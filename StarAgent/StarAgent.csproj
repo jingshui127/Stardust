@@ -46,7 +46,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.Agent" Version="10.16.2026.714-beta1311" />
+    <ProjectReference Include="..\NewLife.Agent.Source\NewLife.Agent\NewLife.Agent.csproj" />
     <PackageReference Include="ILRepack" Version="2.*" Condition="'$(TargetFramework)'=='net461'">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
