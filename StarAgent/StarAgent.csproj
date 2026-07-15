@@ -56,10 +56,6 @@
     <ProjectReference Include="..\Stardust\Stardust.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
   <Import Project="ILRepack.targets" Condition="'$(TargetFramework)'=='net461'" />
 
 </Project>
