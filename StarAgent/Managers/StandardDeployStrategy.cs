@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using NewLife;
 using Stardust.Models;
 
@@ -56,14 +56,17 @@ public class StandardDeployStrategy : DeployStrategyBase
             return null;
         }
 
-        var runFile = context.ExecuteFile.AsFile();
-        if (runFile == null || !runFile.Exists)
+        FileInfo? runFile = null;
+        if (!IsSystemCommand(context.ExecuteFile))
         {
-            context.WriteLog("可执行文件不存在：{0}", context.ExecuteFile);
-            return null;
+            runFile = context.ExecuteFile.AsFile();
+            if (runFile == null || !runFile.Exists)
+            {
+                context.WriteLog("可执行文件不存在：{0}", context.ExecuteFile);
+                return null;
+            }
+            context.WriteLog("运行文件：{0}", runFile.FullName);
         }
-
-        context.WriteLog("运行文件：{0}", runFile.FullName);
 
         var si = BuildProcessStartInfo(context, runFile);
         return StartProcess(context, si);

@@ -108,6 +108,15 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
 
         if (!fileName.IsNullOrEmpty())
         {
+            // 没有扩展名的文件名优先作为系统命令处理（通过PATH查找）
+            var hasExt = !Path.GetExtension(fileName).IsNullOrEmpty();
+            if (!hasExt && !fileName.Contains('/') && !fileName.Contains('\\'))
+            {
+                context.WriteLog("使用系统命令（无扩展名）：{0}", fileName);
+                context.ExecuteFile = fileName;
+                return true;
+            }
+
             if (File.Exists(fileName))
             {
                 runfile = new FileInfo(fileName);
@@ -121,11 +130,24 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
                 }
             }
 
+            // 系统命令（无路径分隔符，通过PATH查找）
             if (runfile == null && !fileName.Contains('/') && !fileName.Contains('\\'))
             {
                 context.WriteLog("使用系统命令：{0}", fileName);
                 context.ExecuteFile = fileName;
                 return true;
+            }
+
+            // 指定路径但文件不存在时，尝试提取文件名通过PATH查找
+            if (runfile == null && (fileName.Contains('/') || fileName.Contains('\\')))
+            {
+                var justName = Path.GetFileName(fileName);
+                if (!justName.IsNullOrEmpty() && !justName.Contains('/') && !justName.Contains('\\'))
+                {
+                    context.WriteLog("指定路径不存在，尝试通过PATH查找：{0}", justName);
+                    context.ExecuteFile = justName;
+                    return true;
+                }
             }
         }
 
@@ -234,19 +256,76 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
         return runfile;
     }
 
+    /// <summary>判断是否为系统命令（无路径分隔符，通过PATH查找）</summary>
+    /// <param name="fileName">文件名</param>
+    /// <returns>是否为系统命令</returns>
+    protected static Boolean IsSystemCommand(String? fileName)
+    {
+        if (fileName.IsNullOrEmpty()) return false;
+        return !fileName.Contains(Path.DirectorySeparatorChar) && !fileName.Contains(Path.AltDirectorySeparatorChar);
+    }
+
+    /// <summary>通过PATH查找可执行文件</summary>
+    /// <param name="fileName">文件名</param>
+    /// <returns>完整路径，找不到返回null</returns>
+    protected static String? FindInPath(String fileName)
+    {
+        if (fileName.IsNullOrEmpty()) return null;
+
+        if (fileName.Contains(Path.DirectorySeparatorChar) || fileName.Contains(Path.AltDirectorySeparatorChar))
+            return File.Exists(fileName) ? fileName : null;
+
+        var paths = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
+        var exts = Runtime.Windows 
+            ? Environment.GetEnvironmentVariable("PATHEXT")?.Split(';') ?? [".EXE", ".CMD", ".BAT"]
+            : [];
+
+        foreach (var dir in paths)
+        {
+            if (dir.IsNullOrEmpty()) continue;
+            var fullPath = Path.Combine(dir, fileName);
+            if (File.Exists(fullPath)) return fullPath;
+
+            if (Runtime.Windows)
+            {
+                foreach (var ext in exts)
+                {
+                    if (ext.IsNullOrEmpty()) continue;
+                    var fullPathExt = fullPath + ext;
+                    if (File.Exists(fullPathExt)) return fullPathExt;
+                }
+            }
+        }
+
+        return null;
+    }
+
     /// <summary>构建进程启动信息</summary>
     /// <param name="context">部署上下文</param>
-    /// <param name="runFile">可执行文件</param>
+    /// <param name="runFile">可执行文件，系统命令时为null</param>
     /// <returns>进程启动信息</returns>
-    protected ProcessStartInfo BuildProcessStartInfo(DeployContext context, FileInfo runFile)
+    protected ProcessStartInfo BuildProcessStartInfo(DeployContext context, FileInfo? runFile)
     {
         var service = context.Service;
         var workDir = context.WorkingDirectory;
         var arguments = context.Arguments ?? "";
+        var execFile = runFile?.FullName ?? context.ExecuteFile ?? "";
+
+        // 系统命令需要通过PATH查找实际路径
+        var isSysCmd = runFile == null && IsSystemCommand(execFile);
+        if (isSysCmd)
+        {
+            var foundPath = FindInPath(execFile);
+            if (!foundPath.IsNullOrEmpty())
+            {
+                execFile = foundPath;
+                runFile = new FileInfo(execFile);
+            }
+        }
 
         var si = new ProcessStartInfo
         {
-            FileName = runFile.FullName,
+            FileName = execFile,
             Arguments = arguments,
             WorkingDirectory = workDir,
 
@@ -264,28 +343,39 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
             si.RedirectStandardOutput = true;
         }
 
-        // 注入星尘监控
-        if (context.StartupHook) SetStartupHook(context, runFile, service, si);
+        // 注入星尘监控（仅对文件型可执行文件有效）
+        if (context.StartupHook && runFile != null) SetStartupHook(context, runFile, service, si);
 
         // 设置应用标识。目标应用将使用该标识连接星尘服务端，实现一份应用程序以多个应用身份运行，比如魔方以cube/cube2/cube3等身份运行
         if (!context.AppId.IsNullOrEmpty())
             si.EnvironmentVariables["StarAppId"] = context.AppId;
 
         // 处理dll和jar文件
-        if (runFile.Extension.EqualIgnoreCase(".dll"))
+        if (runFile != null && runFile.Extension.EqualIgnoreCase(".dll"))
         {
             si.FileName = "dotnet";
             si.Arguments = arguments.IsNullOrEmpty() ? runFile.FullName : $"{runFile.FullName} {arguments}";
         }
-        else if (runFile.Extension.EqualIgnoreCase(".jar"))
+        else if (runFile != null && runFile.Extension.EqualIgnoreCase(".jar"))
         {
             si.FileName = "java";
             si.Arguments = arguments.IsNullOrEmpty() ? $"-jar {runFile.FullName}" : $"-jar {runFile.FullName} {arguments}";
         }
+        else if (runFile != null && Runtime.Windows)
+        {
+            // Windows下.cmd/.bat需要通过cmd.exe运行
+            var ext = runFile.Extension;
+            if (ext.EqualIgnoreCase(".cmd", ".bat"))
+            {
+                si.FileName = "cmd.exe";
+                si.Arguments = $"/c \"{runFile.FullName}\" {arguments}";
+            }
+        }
         else if (Runtime.Linux)
         {
             // Linux下，需要给予可执行权限
-            Process.Start("chmod", $"+x {runFile.FullName}")?.WaitForExit(5_000);
+            if (runFile != null)
+                Process.Start("chmod", $"+x {runFile.FullName}")?.WaitForExit(5_000);
         }
 
         // 环境变量。不能用于ShellExecute

@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using NewLife;
 using Stardust;
 using Stardust.Models;
@@ -112,6 +112,17 @@ public class TaskStrategy : DeployStrategyBase
             WorkingDirectory = context.WorkingDirectory,
             UseShellExecute = false,
         };
+
+        // Windows下.cmd/.bat需要通过cmd.exe运行
+        if (Runtime.Windows && IsSystemCommand(context.ExecuteFile))
+        {
+            var ext = Path.GetExtension(context.ExecuteFile);
+            if (ext.EqualIgnoreCase(".cmd", ".bat"))
+            {
+                psi.FileName = "cmd.exe";
+                psi.Arguments = $"/c \"{context.ExecuteFile}\" {context.Arguments ?? ""}";
+            }
+        }
 
         Process? p = null;
         try
