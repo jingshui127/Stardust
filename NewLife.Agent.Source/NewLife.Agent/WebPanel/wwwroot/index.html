@@ -233,6 +233,7 @@ header .logo .logo-img{width:28px;height:28px;border-radius:6px;object-fit:conta
 <a data-panel="dashboard" class="active">📊 状态</a>
 <a data-panel="control">⚡ 控制</a>
 <a data-panel="config">⚙ 配置</a>
+<a data-panel="staragent">🚀 StarAgent</a>
 <a data-panel="logs">📋 日志</a>
 <a data-panel="watchdog">🐕 看门狗</a>
 <a data-panel="about">ℹ 关于</a>
@@ -242,6 +243,7 @@ header .logo .logo-img{width:28px;height:28px;border-radius:6px;object-fit:conta
 <div id="panel-dashboard" class="panel active"></div>
 <div id="panel-control" class="panel"></div>
 <div id="panel-config" class="panel"></div>
+<div id="panel-staragent" class="panel"></div>
 <div id="panel-logs" class="panel"></div>
 <div id="panel-watchdog" class="panel"></div>
 <div id="panel-about" class="panel"></div>
@@ -322,7 +324,7 @@ function switchPanel(name){
  const link=document.querySelector(`nav a[data-panel="${name}"]`);if(link)link.classList.add('active');
  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
  const panel=$('panel-'+name);if(panel)panel.classList.add('active');
- const loaders={dashboard:loadDashboard,control:null,config:loadConfig,logs:loadLogs,watchdog:loadWatchDog,about:loadAbout};
+ const loaders={dashboard:loadDashboard,control:null,config:loadConfig,staragent:loadStarAgent,logs:loadLogs,watchdog:loadWatchDog,about:loadAbout};
  const loader=window._extLoaders?.[name]||loaders[name];if(loader)loader();
 }
 
@@ -724,6 +726,125 @@ function loadAbout(){
   </div>
 </div>`;
  $('panel-about').innerHTML=html;
+}
+
+/* ── StarAgent Config ── */
+let _staragentConfigDirty=new Set();
+let _staragentServices=[];
+
+async function loadStarAgent(){
+ try{
+  const[j1,j2]=await Promise.all([api('/api/getStarAgentConfig'),api('/api/getServices')]);
+  if(j1.code!==0||j2.code!==0)return;
+  const items=j1.data.items||[];
+  _staragentServices=j2.data.services||[];
+
+  let html=`<div class="glass-card card"><h2>🚀 StarAgent 配置</h2>`;
+  html+=`<table class="config-table"><tbody>`;
+  items.forEach(item=>{
+   html+=`<tr><td>${esc(item.displayName)}</td><td>${renderStarAgentConfigInput(item)}</td><td>${esc(item.description)}</td></tr>`;
+  });
+  html+=`</tbody></table>`;
+  html+=`<div class="mt-16"><button class="btn btn-primary" onclick="saveStarAgentConfig()">💾 保存配置</button> <span style="font-size:12px;color:var(--text-muted);margin-left:12px">部分配置需重启服务后生效</span></div></div>`;
+
+  html+=`<div class="glass-card card mt-16"><h2>📦 应用服务列表</h2>`;
+  if(_staragentServices.length===0){
+   html+=`<div class="empty-state"><div class="empty-icon">📭</div><p>暂无应用服务</p></div>`;
+  }else{
+   html+=`<div style="overflow-x:auto"><table class="info-table" style="min-width:600px"><thead><tr><th style="padding:10px 14px;text-align:left;font-size:12px;font-weight:600;color:var(--text-secondary)">名称</th><th style="padding:10px 14px;text-align:left;font-size:12px;font-weight:600;color:var(--text-secondary)">文件</th><th style="padding:10px 14px;text-align:left;font-size:12px;font-weight:600;color:var(--text-secondary)">参数</th><th style="padding:10px 14px;text-align:left;font-size:12px;font-weight:600;color:var(--text-secondary)">启用</th><th style="padding:10px 14px;text-align:left;font-size:12px;font-weight:600;color:var(--text-secondary)">操作</th></tr></thead><tbody>`;
+   _staragentServices.forEach((svc,i)=>{
+    html+=`<tr><td style="font-size:13px;font-weight:600;color:var(--text-primary)">${esc(svc.name)}</td><td style="font-size:12px;color:var(--text-secondary)">${esc(svc.fileName)}</td><td style="font-size:12px;color:var(--text-secondary)">${esc(svc.arguments||'')}</td><td>${svc.enable?'✅':'❌'}</td><td><button class="btn btn-ghost btn-sm" onclick="editService(${i})">编辑</button> <button class="btn btn-ghost btn-sm" onclick="deleteService(${i})">删除</button></td></tr>`;
+   });
+   html+=`</tbody></table></div>`;
+  }
+  html+=`<div class="mt-16"><button class="btn btn-primary" onclick="addService()">➕ 添加服务</button></div></div>`;
+
+  $('panel-staragent').innerHTML=html;
+ }catch(e){$('panel-staragent').innerHTML=`<div class="glass-card card"><h2>🚀 StarAgent 配置</h2><p class="text-muted">加载失败</p></div>`}
+}
+
+function renderStarAgentConfigInput(item){
+ const v=item.value,n=item.name;
+ if(item.type==='Boolean')
+  return `<label class="toggle"><input type="checkbox" id="staragent-cfg-${n}" ${v?'checked':''} onchange="_staragentConfigDirty.add('${n}')"><span class="track"><span class="thumb"></span></span></label>`;
+ if(item.type==='Int32')
+  return `<input type="number" id="staragent-cfg-${n}" value="${v??0}" onchange="_staragentConfigDirty.add('${n}')">`;
+ return `<input type="text" id="staragent-cfg-${n}" value="${esc(v??'')}" onchange="_staragentConfigDirty.add('${n}')">`;
+}
+
+async function saveStarAgentConfig(){
+ if(_staragentConfigDirty.size===0){showToast('没有需要保存的修改','info');return}
+ const updates={};
+ _staragentConfigDirty.forEach(n=>{
+  const el=$('staragent-cfg-'+n);if(!el)return;let v;
+  if(el.type==='checkbox')v=el.checked;
+  else if(el.type==='number')v=parseInt(el.value)||0;
+  else v=el.value;updates[n]=v;
+ });
+ try{
+  const j=await api('/api/updateStarAgentConfig',{method:'POST',body:JSON.stringify(updates)});
+  if(j.code===0){_staragentConfigDirty.clear();showToast(j.message,'success');loadStarAgent()}
+  else showToast(j.message,'error');
+ }catch(e){showToast('保存失败','error')}
+}
+
+function addService(){
+ const newSvc={name:'',fileName:'',arguments:'',workingDirectory:'',enable:true,mode:'Default',allowMultiple:false,autoStop:false,reloadOnChange:false,maxMemory:0,priority:'Normal',healthCheck:''};
+ _staragentServices.push(newSvc);
+ editService(_staragentServices.length-1);
+}
+
+function deleteService(index){
+ showModal('删除服务','确定要删除服务 "'+_staragentServices[index].name+'" 吗？','删除',async()=>{
+  _staragentServices.splice(index,1);
+  await saveStarAgentServices();
+ });
+}
+
+function editService(index){
+ const svc=_staragentServices[index];
+ let html=`<div style="padding:8px"><div style="display:flex;flex-direction:column;gap:10px">`;
+ html+=`<div><label style="font-size:12px;font-weight:600;color:var(--text-secondary)">服务名称 *</label><input type="text" value="${esc(svc.name)}" id="edit-name" style="width:100%;margin-top:4px"></div>`;
+ html+=`<div><label style="font-size:12px;font-weight:600;color:var(--text-secondary)">可执行文件 *</label><input type="text" value="${esc(svc.fileName)}" id="edit-file" style="width:100%;margin-top:4px"></div>`;
+ html+=`<div><label style="font-size:12px;font-weight:600;color:var(--text-secondary)">参数</label><input type="text" value="${esc(svc.arguments||'')}" id="edit-args" style="width:100%;margin-top:4px"></div>`;
+ html+=`<div><label style="font-size:12px;font-weight:600;color:var(--text-secondary)">工作目录</label><input type="text" value="${esc(svc.workingDirectory||'')}" id="edit-workdir" style="width:100%;margin-top:4px"></div>`;
+ html+=`<div style="display:flex;align-items:center;gap:8px"><input type="checkbox" id="edit-enable" ${svc.enable?'checked':''}><label style="font-size:12px;color:var(--text-secondary)">启用</label></div>`;
+ html+=`<div><label style="font-size:12px;font-weight:600;color:var(--text-secondary)">模式</label><select id="edit-mode" style="width:100%;margin-top:4px"><option value="Default" ${svc.mode==='Default'?'selected':''}>Default</option><option value="Shadow" ${svc.mode==='Shadow'?'selected':''}>Shadow</option></select></div>`;
+ html+=`<div><label style="font-size:12px;font-weight:600;color:var(--text-secondary)">最大内存(MB)</label><input type="number" value="${svc.maxMemory||0}" id="edit-maxmem" style="width:100%;margin-top:4px"></div>`;
+ html+=`</div></div>`;
+
+ const saveBtn=document.createElement('button');
+ saveBtn.className='btn btn-primary';
+ saveBtn.textContent='保存';
+ saveBtn.onclick=async()=>{
+  svc.name=$('edit-name').value;
+  svc.fileName=$('edit-file').value;
+  svc.arguments=$('edit-args').value;
+  svc.workingDirectory=$('edit-workdir').value;
+  svc.enable=$('edit-enable').checked;
+  svc.mode=$('edit-mode').value;
+  svc.maxMemory=parseInt($('edit-maxmem').value)||0;
+  closeModal();
+  await saveStarAgentServices();
+ };
+
+ const modalBody=$('modal-body');
+ modalBody.innerHTML='';
+ modalBody.appendChild(document.createRange().createContextualFragment(html));
+ $('modal-title').textContent='编辑服务';
+ $('modal-confirm-btn').textContent='取消';
+ $('modal-confirm-btn').onclick=closeModal;
+ const footer=$('modal-confirm-btn').parentElement;
+ footer.insertBefore(saveBtn,$('modal-confirm-btn'));
+ $('modal-overlay').classList.remove('hidden');
+}
+
+async function saveStarAgentServices(){
+ try{
+  const j=await api('/api/updateServices',{method:'POST',body:JSON.stringify({services:_staragentServices})});
+  if(j.code===0){showToast(j.message,'success');loadStarAgent()}
+  else showToast(j.message,'error');
+ }catch(e){showToast('保存失败','error')}
 }
 
 /* ── Extensions ── */

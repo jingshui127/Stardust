@@ -308,6 +308,13 @@ internal class MyService : ServiceBase, IServiceProvider
         if (_AliyunDns != null) _AliyunDns.Tracer = _factory?.Tracer;
 
         base.StartWork(reason);
+
+        // 替换为自定义WebPanel，添加StarAgent.config管理API
+        #if !NET40
+        _webPanel?.Stop("replace");
+        _webPanel = new StarAgent.WebPanel.StarAgentWebPanel(this);
+        _webPanel.Start();
+        #endif
     }
 
     private void OnSettingChanged(Object? sender, EventArgs eventArgs)
