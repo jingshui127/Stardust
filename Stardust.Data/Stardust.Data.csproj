@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.1</TargetFrameworks>
+    <AssemblyTitle>Stardust Data</AssemblyTitle>
+    <Description>星尘分布式服务框架数据层。基于XCode ORM的实体模型定义与统计任务，支持节点管理、应用管理、配置中心、注册中心、监控中心、发布中心等业务数据持久化与计算，兼容多种数据库。</Description>
+    <Company>新生命开发团队</Company>
+    <Copyright>©2002-2026 NewLife</Copyright>
+    <VersionPrefix>2.0</VersionPrefix>
+    <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
+    <Version>$(VersionPrefix).$(VersionSuffix)</Version>
+    <FileVersion>$(Version)</FileVersion>
+    <AssemblyVersion>$(VersionPrefix).*</AssemblyVersion>
+    <Deterministic>false</Deterministic>
+    <!--<OutputPath>..\Bin</OutputPath>-->
+    <!--<DocumentationFile>$(OutputPath)\$(TargetFramework)\$(AssemblyName).xml</DocumentationFile>-->
+    <DebugType>pdbonly</DebugType>
+    <Optimize>true</Optimize>
+    <DefineConstants>TRACE</DefineConstants>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>False</IsPackable>
+    <NoWarn>1701;1702;NU5104;NETSDK1138;CS7035</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Config\**" />
+    <Compile Remove="RedisNodes\Config\**" />
+    <EmbeddedResource Remove="Config\**" />
+    <EmbeddedResource Remove="RedisNodes\Config\**" />
+    <None Remove="Config\**" />
+    <None Remove="RedisNodes\Config\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Remove="Configs\应用依赖.Biz.cs" />
+    <Compile Remove="Configs\应用依赖.cs" />
+    <Compile Remove="Configs\配置在线.Biz.cs" />
+    <Compile Remove="Configs\配置在线.cs" />
+    <Compile Remove="Deployment\应用资源.Biz.cs" />
+    <Compile Remove="Deployment\应用资源.cs" />
+    <Compile Remove="Deployment\部署在线.Biz.cs" />
+    <Compile Remove="Deployment\部署在线.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NewLife.XCode" Version="12.0.2026.715-beta0358" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Stardust\Stardust.csproj" />
+  </ItemGroup>
+
+</Project>
