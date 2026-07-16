@@ -234,6 +234,8 @@ header .logo .logo-img{width:28px;height:28px;border-radius:6px;object-fit:conta
 <a data-panel="dashboard" class="active">📊 状态</a>
 <a data-panel="control">⚡ 控制</a>
 <a data-panel="config">⚙ 配置</a>
+<a data-panel="services">📦 应用服务</a>
+<a data-panel="agentconfig">🚀 Agent 配置</a>
 <a data-panel="logs">📋 日志</a>
 <a data-panel="watchdog">🐕 看门狗</a>
 <a data-panel="about">ℹ 关于</a>
@@ -243,6 +245,8 @@ header .logo .logo-img{width:28px;height:28px;border-radius:6px;object-fit:conta
 <div id="panel-dashboard" class="panel active"></div>
 <div id="panel-control" class="panel"></div>
 <div id="panel-config" class="panel"></div>
+<div id="panel-services" class="panel"></div>
+<div id="panel-agentconfig" class="panel"></div>
 <div id="panel-logs" class="panel"></div>
 <div id="panel-watchdog" class="panel"></div>
 <div id="panel-about" class="panel"></div>
@@ -291,7 +295,7 @@ function logout(){sessionStorage.removeItem('agent_token');token='';clearInterva
 
 function showApp(){
  $('login').style.display='none';$('app').style.display='block';
- loadExtensions().then(()=>{loadDashboard();timer=setInterval(loadDashboard,10000)});
+ loadDashboard();timer=setInterval(loadDashboard,10000);
 }
 
 async function api(url,opt={}){
@@ -323,8 +327,8 @@ function switchPanel(name){
  const link=document.querySelector(`nav a[data-panel="${name}"]`);if(link)link.classList.add('active');
  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
  const panel=$('panel-'+name);if(panel)panel.classList.add('active');
- const loaders={dashboard:loadDashboard,control:null,config:loadConfig,logs:loadLogs,watchdog:loadWatchDog,about:loadAbout};
- const loader=window._extLoaders?.[name]||loaders[name];if(loader)loader();
+ const loaders={dashboard:loadDashboard,control:null,config:loadConfig,services:loadServices,agentconfig:loadAgentConfig,logs:loadLogs,watchdog:loadWatchDog,about:loadAbout};
+ const loader=loaders[name];if(loader)loader();
 }
 
 document.querySelector('#nav-bar').addEventListener('click',e=>{
@@ -336,9 +340,13 @@ let _dashboardBuilt=false;
 
 async function loadDashboard(){
  try{
-  const[s,h]=await Promise.all([api('/api/status'),api('/api/health')]);
+  const s=await api('/api/status');
+  // /api/health 可选（若后端未实现则降级）
+  let h={data:null};
+  try{h=await api('/api/health')}catch(e){}
   if(s.code!==0)return;statusData=s.data;
   const d=s.data;
+  const health=h.data;
   const title=d.displayName||d.serviceName||'Agent';
   document.title=title+' 管理面板';
   $('header-title').textContent=title+' 管理面板';
@@ -348,9 +356,9 @@ async function loadDashboard(){
 
   if(!_dashboardBuilt){
    _dashboardBuilt=true;
-   buildDashboard(d,h.data);
+   buildDashboard(d,health);
   }else{
-   updateDashboard(d,h.data);
+   updateDashboard(d,health);
   }
  }catch(e){}
 }
@@ -372,7 +380,7 @@ function buildDashboard(d,health){
 
  // 资源监控仪表盘 —— 8 项指标，4 列 2 行
  // 顺序：CPU使用率、内存、线程数、句柄数、连接数、上行速率、下行速率、磁盘IO
- // 内存：使用物理内存总量计算百分比
+ // 内存：使用物理内存总量计算百分比；若 P/Invoke 失败（memoryTotalMB<=0），则降级显示 0%
  const memTotal = d.memoryTotalMB > 0 ? d.memoryTotalMB : 0;
  const memPct = memTotal > 0 ? Math.round((d.memoryMB / memTotal) * 1000) / 10 : 0;
  const thrPct = health ? pct(health.threadCount, health.threadLimit) : 0;
@@ -557,7 +565,7 @@ async function doControl(action){
  const labels={stop:'停止',start:'启动',restart:'重启'};
  showModal(`${labels[action]}服务`,`确定要${labels[action]}服务吗？${action==='restart'?'重启后服务将自动恢复。':''}`,labels[action],async()=>{
   try{
-   const j=await api('/api/control',{method:'POST',body:JSON.stringify({action})});
+   const j=await api(`/api/control?action=${action}`,{method:'POST'});
    cmdHistory.push({time:new Date().toLocaleString(),action:labels[action],result:j.message||'完成'});
    sessionStorage.setItem('agent_cmd_history',JSON.stringify(cmdHistory));
    showToast(j.message||'操作已提交',j.code?'error':'success');
@@ -569,7 +577,7 @@ async function doControl(action){
 /* ── Config (three-column) ── */
 async function loadConfig(){
  try{
-  const j=await api('/api/configMetadata');if(j.code!==0)return;const items=j.data.items||[];
+  const j=await api('/api/getconfig');if(j.code!==0)return;const items=j.data.items||[];
   let html=`<div class="glass-card card"><h2>⚙ 服务配置</h2><table class="config-table"><tbody>`;
   items.forEach(item=>{
    html+=`<tr><td>${esc(item.displayName)}</td><td>${renderConfigInput(item)}</td><td>${esc(item.description)}</td></tr>`;
@@ -601,17 +609,83 @@ async function saveConfig(){
   else v=el.value;updates[n]=v;
  });
  try{
-  const j=await api('/api/updateConfig',{method:'POST',body:JSON.stringify(updates)});
+  const j=await api('/api/saveconfig',{method:'POST',body:JSON.stringify(updates)});
   if(j.code===0){dirtyFields.clear();showToast(j.message,'success');loadConfig()}
   else showToast(j.message,'error');
  }catch(e){showToast('保存失败','error')}
+}
+
+/* ── 应用服务管理 ── */
+async function loadServices(){
+ const panel=$('panel-services');if(!panel)return;
+ panel.innerHTML=`<div class="glass-card card" style="text-align:center;padding:40px"><p style="color:var(--text-secondary)">加载中...</p></div>`;
+ try{
+  const r=await api('/api/services');
+  if(r.code!==0){panel.innerHTML=`<div class="glass-card card"><h2>📦 应用服务</h2><p class="text-muted">${esc(r.message||'加载失败')}</p></div>`;return}
+  // 兼容 r.data.services 或 r.data 数组
+  const services = (r.data && Array.isArray(r.data.services)) ? r.data.services : (Array.isArray(r.data) ? r.data : []);
+  if(services.length===0){
+   panel.innerHTML=`<div class="glass-card card"><h2>📦 应用服务</h2><div class="empty-state"><div class="empty-icon">📦</div><p>暂无应用服务</p><p style="font-size:11px;margin-top:4px;color:var(--text-muted)">服务列表为空</p></div></div>`;
+   return;
+  }
+  let html=`<div class="glass-card card"><h2>📦 应用服务</h2>`;
+  html+=`<div style="font-size:11px;color:var(--text-muted);margin-bottom:12px">共 ${services.length} 个服务，点击启停按钮控制服务运行状态</div>`;
+  html+=`<table class="info-table"><thead><tr>
+   <th style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;padding:10px 14px;border-bottom:1px solid var(--border-default);text-align:left">服务名称</th>
+   <th style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;padding:10px 14px;border-bottom:1px solid var(--border-default);text-align:left;width:180px">状态</th>
+   <th style="font-size:12px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.5px;padding:10px 14px;border-bottom:1px solid var(--border-default);text-align:left;width:180px">操作</th>
+  </tr></thead><tbody>`;
+  services.forEach(svc=>{
+   const name=svc.name||svc.serviceName||'';
+   const running=svc.running===true||svc.status==='running'||svc.status==='Running';
+   html+=`<tr>
+    <td><span style="font-size:13px;font-weight:600;color:var(--text-primary)">${esc(name)}</span>${svc.description?`<div style="font-size:11px;color:var(--text-muted);margin-top:2px">${esc(svc.description)}</div>`:''}</td>
+    <td><span class="status-indicator ${running?'running':'stopped'}"><span class="status-dot ${running?'on':'off'}"></span>${running?'运行中':'已停止'}</span></td>
+    <td>
+      <button class="btn btn-sm btn-primary" onclick="serviceControl('${escAttr(name)}','start')" ${running?'disabled':''}>▶ 启动</button>
+      <button class="btn btn-sm btn-danger" onclick="serviceControl('${escAttr(name)}','stop')" ${!running?'disabled':''}>⏹ 停止</button>
+    </td>
+   </tr>`;
+  });
+  html+=`</tbody></table></div>`;
+  panel.innerHTML=html;
+ }catch(e){panel.innerHTML=`<div class="glass-card card"><h2>📦 应用服务</h2><p class="text-muted">加载失败</p></div>`}
+}
+
+async function serviceControl(name,action){
+ const labels={stop:'停止',start:'启动'};
+ showModal(`${labels[action]||action}服务`,`确定要${labels[action]||action}服务 "${name}" 吗？`,labels[action]||'确认',async()=>{
+  try{
+   const j=await api(`/api/servicecontrol?name=${encodeURIComponent(name)}&action=${action}`,{method:'POST'});
+   showToast(j.message||'操作已提交',j.code?'error':'success');
+   setTimeout(()=>loadServices(),1500);
+  }catch(e){showToast('操作失败','error')}
+ });
+}
+
+/* ── Agent 配置面板（内置扩展，HTML 模式） ── */
+async function loadAgentConfig(){
+ const panel=$('panel-agentconfig');if(!panel)return;
+ panel.innerHTML=`<div class="glass-card card" style="text-align:center;padding:40px"><p style="color:var(--text-secondary)">加载中...</p></div>`;
+ try{
+  const r=await api('/api/panel');
+  if(r.code!==0){panel.innerHTML=`<div class="glass-card card"><h2>🚀 Agent 配置</h2><p class="text-muted">${esc(r.message||'加载失败')}</p></div>`;return}
+  const html = (r.data && r.data.html) ? r.data.html : (r.data || '');
+  panel.innerHTML=`<div class="glass-card card"><h2>🚀 Agent 配置</h2>${html}</div>`;
+  // 执行 HTML 中的 script 标签（支持面板内交互逻辑）
+  panel.querySelectorAll('script').forEach(oldScript=>{
+   const ns=document.createElement('script');
+   if(oldScript.src)ns.src=oldScript.src;else ns.textContent=oldScript.textContent;
+   oldScript.parentNode.replaceChild(ns,oldScript);
+  });
+ }catch(e){panel.innerHTML=`<div class="glass-card card"><h2>🚀 Agent 配置</h2><p class="text-muted">加载失败</p></div>`}
 }
 
 /* ── Logs ── */
 async function loadLogs(){await loadLogFiles();renderLogPanel();if(currentLogFile||logFiles.length>0)await fetchLogContent();else $('log-content').innerHTML=`<div class="log-empty">📂 未找到日志文件<br><span style="font-size:11px;color:var(--text-muted)">请确保 Log 目录中存在 .log 文件</span></div>`}
 
 async function loadLogFiles(){
- try{const j=await api('/api/logFiles');if(j.code===0)logFiles=j.data.files||[]}catch(e){logFiles=[]}
+ try{const j=await api('/api/logfiles');if(j.code===0)logFiles=j.data.files||[]}catch(e){logFiles=[]}
  if(!currentLogFile&&logFiles.length>0)currentLogFile=logFiles[0].name;
 }
 
@@ -635,7 +709,7 @@ async function refreshLogs(){await loadLogFiles();renderLogPanel();await fetchLo
 async function fetchLogContent(){
  const el=$('log-content');if(!el)return;el.innerHTML=`<div class="log-empty">加载中...</div>`;
  try{
-  let url=`/api/logs?count=500`;
+  let url=`/api/logs?count=200`;
   if(currentLogFile)url+=`&file=${encodeURIComponent(currentLogFile)}`;
   const j=await api(url);
   if(j.code!==0){el.innerHTML=`<div class="log-empty">❌ ${esc(j.message||'加载失败')}</div>`;return}
@@ -725,46 +799,6 @@ function loadAbout(){
   </div>
 </div>`;
  $('panel-about').innerHTML=html;
-}
-
-/* ── Extensions ── */
-window._extLoaders={};
-
-async function loadExtensions(){
- try{
-  const j=await api('/api/extensions');if(j.code!==0)return;const panels=j.data.panels||[];
-  if(panels.length===0)return;
-  const nav=$('nav-bar');
-  panels.sort((a,b)=>(a.order||0)-(b.order||0)).forEach(ext=>{
-   const a=document.createElement('a');a.dataset.panel=ext.id;a.textContent=(ext.icon||'🔌')+' '+ext.name;nav.appendChild(a);
-   const div=document.createElement('div');div.id='panel-'+ext.id;div.className='panel';document.querySelector('main').appendChild(div);
-   window._extLoaders[ext.id]=async()=>{
-    const panel=document.getElementById('panel-'+ext.id);if(!panel)return;
-    panel.innerHTML=`<div class="glass-card card" style="text-align:center;padding:40px"><p style="color:var(--text-secondary)">加载中...</p></div>`;
-    try{
-     const r=await api(ext.apiEndpoint);
-     if(r.code!==0){panel.innerHTML=`<div class="glass-card card"><h2>${ext.icon||''} ${ext.name}</h2><p class="text-muted">${esc(r.message||'加载失败')}</p></div>`;return}
-     if(ext.mode==='html'){
-      panel.innerHTML=`<div class="glass-card card"><h2>${ext.icon||''} ${ext.name}</h2>${r.data?.html||r.data||''}</div>`;
-      // 执行 HTML 中的 script 标签（支持扩展面板的交互逻辑）
-      panel.querySelectorAll('script').forEach(oldScript=>{
-       const ns=document.createElement('script');
-       if(oldScript.src)ns.src=oldScript.src;else ns.textContent=oldScript.textContent;
-       oldScript.parentNode.replaceChild(ns,oldScript);
-      });
-     }
-     else{
-      const d=r.data||r;
-      if(typeof d==='object'&&!Array.isArray(d)){
-       let html=`<div class="glass-card card"><h2>${ext.icon||''} ${ext.name}</h2><div class="stats-grid">`;
-       Object.entries(d).forEach(([k,v])=>{if(k==='code'||k==='message')return;html+=`<div class="stat"><div class="stat-val">${esc(String(v))}</div><div class="stat-lbl">${esc(k)}</div></div>`});
-       html+=`</div></div>`;panel.innerHTML=html;
-      }else{panel.innerHTML=`<div class="glass-card card"><h2>${ext.icon||''} ${ext.name}</h2><pre style="font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;color:var(--text-secondary)">${esc(JSON.stringify(d,null,2))}</pre></div>`}
-     }
-    }catch(e){panel.innerHTML=`<div class="glass-card card"><h2>${ext.icon||''} ${ext.name}</h2><p class="text-muted">加载失败</p></div>`}
-   };
-  });
- }catch(e){}
 }
 
 function esc(s){return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}

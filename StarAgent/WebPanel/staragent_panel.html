@@ -37,7 +37,7 @@ function _saEsc(s){return String(s||'').replace(/[&<>'"]/g,function(c){return {'
 
 async function _saLoad(){
   try{
-    var j=await _saApi('/api/getagentconfig');
+    var j=await _saApi('/api/getconfig');
     if(j.code!==0){document.getElementById('sa-content').innerHTML='<p style="color:var(--red)">'+_saEsc(j.message)+'</p>';return}
     _saData=j.data;_saRender();
   }catch(e){document.getElementById('sa-content').innerHTML='<p style="color:var(--red)">加载失败：'+_saEsc(e.message)+'</p>'}
@@ -138,7 +138,7 @@ function _saDelete(i){
 async function _saSave(){
   var data=_saCollect();
   try{
-    var j=await _saApi('/api/saveagentconfig',{method:'POST',body:JSON.stringify({content:JSON.stringify(data)})});
+    var j=await _saApi('/api/saveconfig',{method:'POST',body:JSON.stringify({content:JSON.stringify(data)})});
     if(j.code===0){alert(j.message);await _saLoad()}else{alert(j.message)}
   }catch(e){alert('保存失败：'+e.message)}
 }

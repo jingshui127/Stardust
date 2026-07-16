@@ -48,10 +48,12 @@
   <ItemGroup>
     <!-- Agent 配置面板 HTML 资源（扩展面板加载时读取） -->
     <EmbeddedResource Include="WebPanel\staragent_panel.html" />
+    <!-- Web 面板静态资源（index.html, logo.png, favicon.ico） -->
+    <EmbeddedResource Include="wwwroot\**\*" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\NewLife.Agent.Source\NewLife.Agent\NewLife.Agent.csproj" />
+    <PackageReference Include="NewLife.Agent" Version="10.16.2026.701" />
     <PackageReference Include="ILRepack" Version="2.*" Condition="'$(TargetFramework)'=='net461'">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>

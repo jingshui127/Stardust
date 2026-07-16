@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.3.11520.95
@@ -51,10 +51,6 @@ EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TestC", "Samples\TestC\TestC.csproj", "{1827525F-2624-4DC5-8947-B8A5A069C08F}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AgentExpansion", "Plugins\AgentExpansion\AgentExpansion.csproj", "{E7CB19B4-B955-4E6D-8488-FBA14C5C999A}"
-EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "NewLife.Agent.Source", "NewLife.Agent.Source", "{BD44035F-A919-226D-52E3-744055C09865}"
-EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NewLife.Agent", "NewLife.Agent.Source\NewLife.Agent\NewLife.Agent.csproj", "{F5B018E5-1198-4489-BDFF-71E269072FE1}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -270,18 +266,6 @@ Global
 		{E7CB19B4-B955-4E6D-8488-FBA14C5C999A}.Release|x64.Build.0 = Release|Any CPU
 		{E7CB19B4-B955-4E6D-8488-FBA14C5C999A}.Release|x86.ActiveCfg = Release|Any CPU
 		{E7CB19B4-B955-4E6D-8488-FBA14C5C999A}.Release|x86.Build.0 = Release|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Debug|x64.ActiveCfg = Debug|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Debug|x64.Build.0 = Debug|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Debug|x86.ActiveCfg = Debug|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Debug|x86.Build.0 = Debug|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Release|x64.ActiveCfg = Release|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Release|x64.Build.0 = Release|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Release|x86.ActiveCfg = Release|Any CPU
-		{F5B018E5-1198-4489-BDFF-71E269072FE1}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -295,7 +279,6 @@ Global
 		{4CF398BC-76FC-49DB-AD2A-8947062D6C34} = {E636ED18-3DBE-41AA-904A-1294EF9DA8DD}
 		{1827525F-2624-4DC5-8947-B8A5A069C08F} = {E636ED18-3DBE-41AA-904A-1294EF9DA8DD}
 		{E7CB19B4-B955-4E6D-8488-FBA14C5C999A} = {11AD7F18-1320-41C5-B4A9-F208DBCAA5A9}
-		{F5B018E5-1198-4489-BDFF-71E269072FE1} = {BD44035F-A919-226D-52E3-744055C09865}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {9337283C-C795-479F-A2F1-C892EBE2490C}

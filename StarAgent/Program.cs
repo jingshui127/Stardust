@@ -320,7 +320,7 @@ internal class MyService : ServiceBase, IServiceProvider
         base.StartWork(reason);
     }
 
-    /// <summary>启动自建 Web 管理面板（继承 AgentWebPanel，复用完整功能 + 强类型配置管理）</summary>
+    /// <summary>启动自建 Web 管理面板（基于 HttpServer，不依赖 NewLife.Agent.WebPanel）</summary>
     private void StartWebPanel()
     {
         try

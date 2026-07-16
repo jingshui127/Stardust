@@ -34,9 +34,9 @@
     <Delete Files="@(InputAssemblies)" />
     <Delete Files="@(InputPdbs)" />
     <Delete Files="$(OutputPathFull)StarAgent.exe.config" />
-    <!-- 复制NewLife.Agent.WebPanel的wwwroot到输出目录（物理文件优先于嵌入资源） -->
+    <!-- 复制StarAgent自建wwwroot到输出目录 -->
     <ItemGroup>
-      <WwwrootFiles Include="$(MSBuildThisFileDirectory)..\NewLife.Agent.Source\NewLife.Agent\WebPanel\wwwroot\**\*" />
+      <WwwrootFiles Include="$(MSBuildThisFileDirectory)wwwroot\**\*" />
     </ItemGroup>
     <Copy SourceFiles="@(WwwrootFiles)" DestinationFolder="$(OutputPathFull)wwwroot\%(RecursiveDir)" />
   </Target>
