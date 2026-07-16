@@ -267,7 +267,7 @@ header .logo .logo-img{width:28px;height:28px;border-radius:6px;object-fit:conta
 <div id="toast" class="toast"></div>
 
 <script>
-let token='',timer=null,statusData=null,logFiles=[],currentLogFile=null;
+var token='',timer=null,statusData=null,logFiles=[],currentLogFile=null;
 let cmdHistory=JSON.parse(sessionStorage.getItem('agent_cmd_history')||'[]');
 const $=id=>document.getElementById(id);
 

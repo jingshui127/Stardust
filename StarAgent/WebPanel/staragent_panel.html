@@ -27,8 +27,9 @@
 let _saData=null;
 
 async function _saApi(path,opts){
-  var token=sessionStorage.getItem('agent_token')||localStorage.getItem('agent_token')||'';
-  var headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'};
+  var t='';
+  try{t=window.token||sessionStorage.getItem('agent_token')||localStorage.getItem('agent_token')||''}catch(e){}
+  var headers={'Authorization':'Bearer '+t,'Content-Type':'application/json'};
   var resp=await fetch(path,Object.assign({},opts,{headers:headers}));
   return resp.json();
 }
