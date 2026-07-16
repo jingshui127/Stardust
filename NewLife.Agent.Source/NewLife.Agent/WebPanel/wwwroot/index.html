@@ -729,61 +729,51 @@ function loadAbout(){
  $('panel-about').innerHTML=html;
 }
 
-/* ── StarAgent Config (表格化 + 原始XML双视图) ── */
-let _saRaw='',_saFile='',_saView='table';
+/* ── StarAgent Config (JSON对象操作，后端XDocument保证XML格式正确) ── */
+let _saData=null,_saFile='',_saView='table';
 async function loadStarAgent(){
  try{
   const j=await api('/api/getstaragentconfig');
   if(j.code!==0){$('panel-staragent').innerHTML=`<div class="glass-card card"><h2>🚀 Agent 配置</h2><p class="text-muted">加载失败：${esc(j.message)}</p></div>`;return}
-  _saRaw=j.data.content||'';_saFile=j.data.file||'';_saView='table';
+  _saData=j.data;_saFile=j.data.file||'';_saView='table';
   renderStarAgent();
  }catch(e){$('panel-staragent').innerHTML=`<div class="glass-card card"><h2>🚀 Agent 配置</h2><p class="text-muted">加载失败：${esc(e.message)}</p></div>`}
 }
-function _saParse(){
- const doc=new DOMParser().parseFromString(_saRaw,'text/xml');
- const root=doc.documentElement;const fields=[];const services=[];
- for(let n=root.firstChild;n;n=n.nextSibling){
-  if(n.nodeType!==1)continue;
-  if(n.nodeName==='Services'){
-   n.querySelectorAll('ServiceInfo').forEach(si=>{const a={};for(const at of si.attributes)a[at.name]=at.value;services.push(a)});
-  }else{
-   let c='';let p=n.previousSibling;
-   while(p){if(p.nodeType===8){c=p.nodeValue.trim();break}if(p.nodeType===1)break;p=p.previousSibling}
-   const v=n.textContent||'';const isBool=/^(true|false)$/i.test(v);const isNum=/^-?\d+$/.test(v.trim());
-   fields.push({name:n.nodeName,value:v,comment:c,isBool,isNum});
-  }
- }
- return {fields,services,doc};
-}
 function _saRenderToggle(id,checked){return `<label class="toggle"><input type="checkbox" id="${id}" ${checked?'checked':''}><span class="track"><span class="thumb"></span></span></label>`}
 function renderStarAgent(){
+ if(!_saData){return}
  let html=`<div class="glass-card card"><h2>🚀 Agent 配置</h2>`;
  html+=`<div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;word-break:break-all">📁 ${esc(_saFile)}</div>`;
  html+=`<div style="display:flex;gap:8px;margin-bottom:16px;border-bottom:1px solid var(--border-subtle);padding-bottom:12px">`;
  html+=`<button class="btn btn-sm ${_saView==='table'?'btn-primary':'btn-ghost'}" onclick="_saSetView('table')">📋 表格视图</button>`;
  html+=`<button class="btn btn-sm ${_saView==='raw'?'btn-primary':'btn-ghost'}" onclick="_saSetView('raw')">📝 原始XML</button></div>`;
+ const fields=_saData.fields||[];
+ const services=_saData.services||[];
  if(_saView==='raw'){
-  html+=`<textarea id="sa-content" spellcheck="false" style="width:100%;height:480px;font-family:Consolas,Monaco,monospace;font-size:13px;line-height:1.5;padding:14px;border:1px solid rgba(255,255,255,0.1);border-radius:10px;background:rgba(0,0,0,0.25);color:var(--text-primary);resize:vertical;tab-size:2;white-space:pre;overflow:auto">${esc(_saRaw)}</textarea>`;
+  html+=`<textarea id="sa-content" spellcheck="false" style="width:100%;height:480px;font-family:Consolas,Monaco,monospace;font-size:13px;line-height:1.5;padding:14px;border:1px solid rgba(255,255,255,0.1);border-radius:10px;background:rgba(0,0,0,0.25);color:var(--text-primary);resize:vertical;tab-size:2;white-space:pre;overflow:auto">${esc(_saData.content||'')}</textarea>`;
  }else{
-  const {fields,services}=_saParse();
-  // 字段分级：可编辑 / 只读（需重启） / 只读（系统字段）
   const editable=new Set(['Debug','Delay','SyncTime','StartupHook']);
   const systemFields=new Set(['UserName','Dpi','Resolution']);
-  // ── 1. 应用服务（高频修改，优先展示） ──
+  const svcKeys=['Name','Enable','FileName','Arguments','WorkingDirectory','UserName','Mode','MaxMemory'];
+  // ── 1. 应用服务 ──
+  html+=`<div class="section-title" style="display:flex;align-items:center;justify-content:space-between">`;
+  html+=`<span>应用服务（${services.length}）</span>`;
+  html+=`<button class="btn btn-sm btn-primary" onclick="_saAddService()" style="padding:4px 10px;font-size:12px">+ 新增服务</button></div>`;
   if(services.length){
-   html+=`<div class="section-title">应用服务（${services.length}）</div>`;
    services.forEach((s,i)=>{
     const en=/true/i.test(s.Enable||'');
     html+=`<div class="glass-card" style="padding:14px 18px;margin-bottom:10px">`;
     html+=`<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">`;
-    html+=`<div style="display:flex;align-items:center;gap:10px"><span class="status-dot ${en?'on':'off'}"></span><strong style="font-size:14px">${esc(s.Name||'')}</strong></div>`;
-    html+=_saRenderToggle('sa-svc-'+i+'-Enable',en);
+    html+=`<div style="display:flex;align-items:center;gap:10px"><span class="status-dot ${en?'on':'off'}"></span><input type="text" id="sa-svc-${i}-Name" value="${esc(s.Name||'')}" style="font-size:14px;font-weight:600;background:transparent;border:none;border-bottom:1px dashed var(--border-subtle);color:var(--text-primary);padding:2px 4px;min-width:120px" placeholder="服务名"></div>`;
+    html+=`<div style="display:flex;align-items:center;gap:10px"><span style="font-size:11px;color:var(--text-muted)">启用</span>${_saRenderToggle('sa-svc-'+i+'-Enable',en)}<button class="btn btn-sm btn-ghost" onclick="_saDeleteService(${i})" style="padding:4px 8px;font-size:11px;color:var(--red)">🗑 删除</button></div>`;
     html+=`</div>`;
     const _saField=k=>`<div style="flex:1;min-width:120px"><label style="color:var(--text-tertiary);font-size:11px;display:block;margin-bottom:3px">${k}</label><input type="text" id="sa-svc-${i}-${k}" value="${esc(s[k]||'')}" style="width:100%;margin:0"></div>`;
     html+=`<div style="display:flex;flex-wrap:nowrap;gap:12px;font-size:12px;align-items:flex-end">`;
     ['FileName','Arguments','WorkingDirectory','UserName','Mode','MaxMemory'].forEach(k=>{html+=_saField(k)});
     html+=`</div></div>`;
    });
+  }else{
+   html+=`<div style="padding:20px;text-align:center;color:var(--text-muted);font-size:13px">暂无应用服务，点击右上角"+ 新增服务"添加</div>`;
   }
   // ── 2. 运行时可改配置 ──
   const editFields=fields.filter(f=>editable.has(f.name));
@@ -791,11 +781,13 @@ function renderStarAgent(){
    html+=`<div class="section-title" style="margin-top:24px">运行时配置<span style="font-weight:400;color:var(--text-muted);margin-left:8px;font-size:11px">修改后立即生效</span></div>`;
    html+=`<table class="config-table"><tbody>`;
    editFields.forEach(f=>{
+    const isBool=/^(true|false)$/i.test(f.value);
+    const isNum=/^-?\d+$/.test((f.value||'').trim());
     let inp='';
-    if(f.isBool)inp=_saRenderToggle('sa-'+f.name,/true/i.test(f.value));
-    else if(f.isNum)inp=`<input type="number" id="sa-${f.name}" value="${esc(f.value)}">`;
+    if(isBool)inp=_saRenderToggle('sa-'+f.name,/true/i.test(f.value));
+    else if(isNum)inp=`<input type="number" id="sa-${f.name}" value="${esc(f.value)}">`;
     else inp=`<input type="text" id="sa-${f.name}" value="${esc(f.value)}">`;
-    html+=`<tr><td>${esc(f.name)}</td><td>${inp}</td><td>${esc(f.comment)}</td></tr>`;
+    html+=`<tr><td>${esc(f.name)}</td><td>${inp}</td><td>${esc(f.comment||'')}</td></tr>`;
    });
    html+=`</tbody></table>`;
   }
@@ -808,7 +800,7 @@ function renderStarAgent(){
     const isSys=systemFields.has(f.name);
     const tag=isSys?'<span style="font-size:10px;color:var(--text-muted);background:rgba(255,255,255,0.06);padding:2px 6px;border-radius:4px;margin-left:6px">系统字段</span>':'<span style="font-size:10px;color:var(--yellow);background:var(--yellow-bg);padding:2px 6px;border-radius:4px;margin-left:6px">需重启</span>';
     const inp=`<input type="text" value="${esc(f.value)}" disabled style="opacity:0.55;cursor:not-allowed">`;
-    html+=`<tr><td>${esc(f.name)}${tag}</td><td>${inp}</td><td>${esc(f.comment)}</td></tr>`;
+    html+=`<tr><td>${esc(f.name)}${tag}</td><td>${inp}</td><td>${esc(f.comment||'')}</td></tr>`;
    });
    html+=`</tbody></table></details>`;
   }
@@ -816,33 +808,62 @@ function renderStarAgent(){
  html+=`<div class="mt-16" style="display:flex;align-items:center;gap:12px"><button class="btn btn-primary" onclick="saveStarAgentConfig()">💾 保存配置</button><button class="btn btn-ghost" onclick="loadStarAgent()">↻ 重新加载</button><span style="font-size:12px;color:var(--text-muted)">保存后自动重载，部分配置需重启服务</span></div></div>`;
  $('panel-staragent').innerHTML=html;
 }
-function _saSetView(m){if(_saView==='table'&&m==='raw')_saSync();_saView=m;renderStarAgent()}
-function _saSync(){
- const doc=new DOMParser().parseFromString(_saRaw,'text/xml');const root=doc.documentElement;
- for(let n=root.firstChild;n;n=n.nextSibling){
-  if(n.nodeType!==1||n.nodeName==='Services')continue;
-  const el=$('sa-'+n.nodeName);if(!el)continue;
-  n.textContent=el.type==='checkbox'?(el.checked?'true':'false'):el.value;
- }
- for(let n=root.firstChild;n;n=n.nextSibling){
-  if(n.nodeType!==1||n.nodeName!=='Services')continue;
-  n.querySelectorAll('ServiceInfo').forEach((si,i)=>{
-   ['Enable','FileName','Arguments','WorkingDirectory','UserName','Mode','MaxMemory'].forEach(k=>{
-    const el=$('sa-svc-'+i+'-'+k);if(!el)return;
-    si.setAttribute(k,el.type==='checkbox'?(el.checked?'true':'false'):el.value);
-   });
+function _saSetView(m){_saView=m;renderStarAgent()}
+// 从input收集数据为JSON对象（不碰XML字符串）
+function _saCollect(){
+ const fields=(_saData.fields||[]).map(f=>{
+  const el=$('sa-'+f.name);
+  if(!el)return {name:f.name,value:f.value};
+  return {name:f.name,value:el.type==='checkbox'?(el.checked?'true':'false'):el.value};
+ });
+ const services=(_saData.services||[]).map((s,i)=>{
+  const o={};
+  ['Name','Enable','FileName','Arguments','WorkingDirectory','UserName','Mode','MaxMemory'].forEach(k=>{
+   const el=$('sa-svc-'+i+'-'+k);
+   if(el){o[k]=el.type==='checkbox'?(el.checked?'true':'false'):el.value}
+   else if(s[k]!==undefined){o[k]=s[k]}
   });
- }
- let s=new XMLSerializer().serializeToString(doc);
- if(!s.startsWith('<?xml'))s='<?xml version="1.0" encoding="utf-8"?>\r\n'+s;
- _saRaw=s;
+  // 保留其他属性
+  Object.keys(s).forEach(k=>{if(o[k]===undefined)o[k]=s[k]});
+  return o;
+ });
+ return {fields,services};
+}
+function _saAddService(){
+ // 先收集当前数据
+ const data=_saCollect();
+ // 添加新服务（默认值）
+ const defaults={Name:'NewService',FileName:'',Arguments:'',WorkingDirectory:'',UserName:'',Enable:'false',Mode:'Default',AllowMultiple:'false',Environments:'',AutoStop:'false',ReloadOnChange:'false',MaxMemory:'0',OomScoreAdjust:'0',Priority:'Normal',HealthCheck:''};
+ data.services.push(defaults);
+ _saData.fields=data.fields;_saData.services=data.services;
+ renderStarAgent();
+ showToast('已新增服务，请填写信息后保存','info');
+}
+function _saDeleteService(i){
+ const data=_saCollect();
+ if(i<0||i>=data.services.length)return;
+ const name=data.services[i].Name||'';
+ if(!confirm(`确定删除服务"${name}"吗？\n该操作仅修改配置文件，不影响正在运行的进程。\n点击保存配置后生效。`))return;
+ data.services.splice(i,1);
+ _saData.fields=data.fields;_saData.services=data.services;
+ renderStarAgent();
+ showToast('已删除服务，点击保存配置后生效','info');
 }
 async function saveStarAgentConfig(){
- let content=_saView==='raw'?($('sa-content')?.value||''):(_saSync(),_saRaw);
- if(!content.trim()){showToast('配置内容不能为空','error');return}
+ let payload;
+ if(_saView==='raw'){
+  // 原始XML模式：直接提交XML字符串（后端会处理）
+  const rawContent=$('sa-content')?.value||'';
+  if(!rawContent.trim()){showToast('配置内容不能为空','error');return}
+  // 原始XML模式暂时不支持（需要后端额外接口），提示用户切换到表格视图
+  showToast('请切换到表格视图保存配置','error');return;
+ }else{
+  const data=_saCollect();
+  payload=JSON.stringify(data);
+ }
  try{
-  const j=await api('/api/savestaragentconfig',{method:'POST',body:JSON.stringify({content})});
-  if(j.code===0){showToast(j.message,'success');_saRaw=content}else showToast(j.message,'error');
+  const j=await api('/api/savestaragentconfig',{method:'POST',body:JSON.stringify({content:payload})});
+  if(j.code===0){showToast(j.message,'success');await loadStarAgent()}else showToast(j.message,'error');
  }catch(e){showToast('保存失败：'+e.message,'error')}
 }
 
@@ -863,7 +884,15 @@ async function loadExtensions(){
     try{
      const r=await api(ext.apiEndpoint);
      if(r.code!==0){panel.innerHTML=`<div class="glass-card card"><h2>${ext.icon||''} ${ext.name}</h2><p class="text-muted">${esc(r.message||'加载失败')}</p></div>`;return}
-     if(ext.mode==='html'){panel.innerHTML=`<div class="glass-card card"><h2>${ext.icon||''} ${ext.name}</h2>${r.data?.html||r.data||''}</div>`}
+     if(ext.mode==='html'){
+      panel.innerHTML=`<div class="glass-card card"><h2>${ext.icon||''} ${ext.name}</h2>${r.data?.html||r.data||''}</div>`;
+      // 执行 HTML 中的 script 标签（支持扩展面板的交互逻辑）
+      panel.querySelectorAll('script').forEach(oldScript=>{
+       const ns=document.createElement('script');
+       if(oldScript.src)ns.src=oldScript.src;else ns.textContent=oldScript.textContent;
+       oldScript.parentNode.replaceChild(ns,oldScript);
+      });
+     }
      else{
       const d=r.data||r;
       if(typeof d==='object'&&!Array.isArray(d)){

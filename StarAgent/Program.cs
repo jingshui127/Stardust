@@ -47,6 +47,14 @@ internal class Program
         {
             agentConfig.Description = "持续监控应用运行状态，自动重启崩溃服务.科控物联QQ：2492123056";
             agentConfig.WebPort = 5581;
+            // 禁用 ServiceBase 自动创建 WebPanel，改用 StarAgentWebPanel 继承版
+            agentConfig.EnableWebPanel = false;
+            agentConfig.Save();
+        }
+        else if (agentConfig.EnableWebPanel)
+        {
+            // 确保旧版本升级后也禁用自动创建
+            agentConfig.EnableWebPanel = false;
             agentConfig.Save();
         }
         var set = StarSetting.Current;
@@ -230,6 +238,7 @@ internal class MyService : ServiceBase, IServiceProvider
     private PluginManager _PluginManager;
     //private String _lastVersion;
     private AliyunDnsClient? _AliyunDns;
+    private new StarAgent.WebPanel.StarAgentWebPanel? _webPanel;
 
     #region 调度核心
     /// <summary>服务启动</summary>
@@ -271,7 +280,8 @@ internal class MyService : ServiceBase, IServiceProvider
         // 监听端口，用于本地通信
         if (set.LocalPort > 0) StartLocalServer(set.LocalPort);
 
-        // Web管理面板由 ServiceBase 自动创建（读取 StarAgent.config 的 WebPort）
+        // 启动自建 Web 管理面板（独立于 NewLife.Agent.WebPanel，强类型操作 StarAgentSetting）
+        StartWebPanel();
 
         // 启动星尘客户端，连接服务端
         StartClient();
@@ -308,6 +318,22 @@ internal class MyService : ServiceBase, IServiceProvider
         if (_AliyunDns != null) _AliyunDns.Tracer = _factory?.Tracer;
 
         base.StartWork(reason);
+    }
+
+    /// <summary>启动自建 Web 管理面板（继承 AgentWebPanel，复用完整功能 + 强类型配置管理）</summary>
+    private void StartWebPanel()
+    {
+        try
+        {
+            _webPanel = new StarAgent.WebPanel.StarAgentWebPanel(this);
+            _webPanel.Start();
+
+            WriteLog("StarAgent Web 面板已启动，端口：{0}", _webPanel.Port);
+        }
+        catch (Exception ex)
+        {
+            XTrace.WriteException(ex);
+        }
     }
 
     private void OnSettingChanged(Object? sender, EventArgs eventArgs)
@@ -349,6 +375,10 @@ internal class MyService : ServiceBase, IServiceProvider
     public override void StopWork(String reason)
     {
         base.StopWork(reason);
+
+        // 停止自建 Web 面板
+        _webPanel?.TryDispose();
+        _webPanel = null;
 
         // 停止插件
         WriteLog("停止插件[{0}]", _PluginManager.Identity);
