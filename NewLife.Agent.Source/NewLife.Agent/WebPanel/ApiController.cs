@@ -335,6 +335,39 @@ public class ApiController : IHttpController
     }
     #endregion
 
+    #region StarAgent配置文件
+    /// <summary>获取StarAgent.config原始XML内容</summary>
+    /// <returns>配置文件内容和路径</returns>
+    public Object GetStarAgentConfig()
+    {
+        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+
+        var file = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Config", "StarAgent.config");
+        var content = File.Exists(file) ? File.ReadAllText(file) : "";
+
+        return new { code = 0, data = new { content, file } };
+    }
+
+    /// <summary>保存StarAgent.config原始XML内容</summary>
+    /// <param name="content">XML配置内容</param>
+    /// <returns>保存结果</returns>
+    public Object SaveStarAgentConfig(String content)
+    {
+        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+
+        if (content.IsNullOrEmpty()) return new { code = 400, message = "配置内容不能为空" };
+
+        var file = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Config", "StarAgent.config");
+        var dir = Path.GetDirectoryName(file);
+        if (!dir.IsNullOrEmpty() && !Directory.Exists(dir)) Directory.CreateDirectory(dir!);
+
+        File.WriteAllText(file, content);
+
+        XTrace.WriteLine("StarAgent.config 已通过Web面板更新：{0}", file);
+        return new { code = 0, message = "配置已保存，文件变更将自动重载（部分配置需重启服务后生效）" };
+    }
+    #endregion
+
     #region 日志
     /// <summary>获取日志内容</summary>
     /// <param name="count">读取行数，默认200，最大1000</param>
