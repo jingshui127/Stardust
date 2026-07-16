@@ -321,10 +321,24 @@ internal class MyService : ServiceBase, IServiceProvider
 
     private void OnServiceChanged(Object? sender, EventArgs eventArgs)
     {
-        // 服务改变时，保存到配置文件
+        // 服务改变时，只更新Enable状态到配置文件
+        // 不替换整个Services数组，避免用ServiceManager内存中的旧值（如WorkingDirectory）覆盖配置文件中的新值
         var set = AgentSetting;
-        set.Services = _Manager.Services.Select(e => e.Clone()).ToArray();
-        set.Save();
+        var mgrServices = _Manager.Services ?? [];
+        var setServices = set.Services ?? [];
+
+        var changed = false;
+        foreach (var mgrSvc in mgrServices)
+        {
+            var setSvc = setServices.FirstOrDefault(e => e.Name.EqualIgnoreCase(mgrSvc.Name));
+            if (setSvc != null && setSvc.Enable != mgrSvc.Enable)
+            {
+                setSvc.Enable = mgrSvc.Enable;
+                changed = true;
+            }
+        }
+
+        if (changed) set.Save();
     }
 
     /// <summary>服务停止</summary>
