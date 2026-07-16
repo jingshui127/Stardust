@@ -3,8 +3,6 @@ using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Reflection;
 using System.Runtime.InteropServices;
-using System.Xml;
-using System.Xml.Linq;
 using NewLife.Data;
 using NewLife.Http;
 using NewLife.Log;
@@ -334,129 +332,6 @@ public class ApiController : IHttpController
         XTrace.WriteLine("Web面板密码已修改");
 
         return new { code = 0, message = "密码已修改，下次登录请使用新密码" };
-    }
-    #endregion
-
-    #region StarAgent配置文件
-    private static String GetStarAgentConfigPath() => Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Config", "StarAgent.config");
-
-    /// <summary>获取StarAgent.config配置（结构化JSON，前端操作JSON不碰XML）</summary>
-    /// <returns>fields字段列表 + services服务列表 + content原始XML（只读预览）</returns>
-    public Object GetStarAgentConfig()
-    {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
-
-        var file = GetStarAgentConfigPath();
-        var content = File.Exists(file) ? File.ReadAllText(file) : "";
-
-        var fields = new List<Object>();
-        var services = new List<Dictionary<String, String>>();
-
-        try
-        {
-            var doc = XDocument.Parse(content);
-            var root = doc.Root;
-            if (root != null)
-            {
-                foreach (var el in root.Elements())
-                {
-                    if (el.Name.LocalName == "Services")
-                    {
-                        foreach (var si in el.Elements("ServiceInfo"))
-                        {
-                            var svc = new Dictionary<String, String>();
-                            foreach (var attr in si.Attributes())
-                                svc[attr.Name.LocalName] = attr.Value;
-                            services.Add(svc);
-                        }
-                    }
-                    else
-                    {
-                        var comment = "";
-                        var prev = el.PreviousNode;
-                        while (prev != null)
-                        {
-                            if (prev.NodeType == XmlNodeType.Comment) { comment = ((XComment)prev).Value.Trim(); break; }
-                            if (prev.NodeType == XmlNodeType.Element) break;
-                            prev = prev.PreviousNode;
-                        }
-                        fields.Add(new { name = el.Name.LocalName, value = el.Value, comment });
-                    }
-                }
-            }
-        }
-        catch { }
-
-        return new { code = 0, data = new { content, file, fields, services } };
-    }
-
-    /// <summary>保存StarAgent.config（接收JSON，后端用XDocument正确写入XML属性，绝不产生子元素）</summary>
-    /// <param name="content">JSON字符串: {fields:[{name,value}], services:[{Name,Enable,FileName,...}]}</param>
-    /// <returns>保存结果</returns>
-    public Object SaveStarAgentConfig(String content)
-    {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
-        if (content.IsNullOrEmpty()) return new { code = 400, message = "配置内容不能为空" };
-
-        var file = GetStarAgentConfigPath();
-        if (!File.Exists(file)) return new { code = 404, message = "配置文件不存在" };
-
-        try
-        {
-            var json = JsonParser.Decode(content);
-
-            var doc = XDocument.Load(file);
-            var root = doc.Root;
-
-            // 更新普通字段
-            var fields = json["fields"] as IList<Object>;
-            if (fields != null)
-            {
-                foreach (var fObj in fields)
-                {
-                    var f = fObj as IDictionary<String, Object>;
-                    var name = f["name"]?.ToString();
-                    var value = f["value"]?.ToString() ?? "";
-                    if (name.IsNullOrEmpty()) continue;
-
-                    var el = root.Element(name);
-                    if (el != null) el.Value = value;
-                }
-            }
-
-            // 更新 Services：删除旧的 ServiceInfo，添加新的（保证属性格式正确）
-            var servicesNode = root.Element("Services");
-            if (servicesNode == null)
-            {
-                servicesNode = new XElement("Services");
-                root.Add(servicesNode);
-            }
-            servicesNode.RemoveAll();
-
-            var services = json["services"] as IList<Object>;
-            if (services != null)
-            {
-                foreach (var svcObj in services)
-                {
-                    var svc = svcObj as IDictionary<String, Object>;
-                    var si = new XElement("ServiceInfo");
-                    foreach (var kv in svc)
-                    {
-                        si.SetAttributeValue(kv.Key, kv.Value?.ToString() ?? "");
-                    }
-                    servicesNode.Add(si);
-                }
-            }
-
-            doc.Save(file);
-            XTrace.WriteLine("StarAgent.config 已通过Web面板更新：{0}", file);
-            return new { code = 0, message = "配置已保存，文件变更将自动重载（部分配置需重启服务后生效）" };
-        }
-        catch (Exception ex)
-        {
-            XTrace.WriteException(ex);
-            return new { code = 500, message = "保存失败：" + ex.Message };
-        }
     }
     #endregion
 
