@@ -37,30 +37,26 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="..\Stardust\Managers\ServiceController.cs" Link="Managers\ServiceController.cs" />
-    <Compile Include="..\Stardust\Managers\ServiceManager.cs" Link="Managers\ServiceManager.cs" />
-  </ItemGroup>
-  
-  <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.Globalization.Invariant" Value="true" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Agent 配置面板 HTML 资源（扩展面板加载时读取） -->
-    <EmbeddedResource Include="WebPanel\staragent_panel.html" />
-    <!-- Web 面板静态资源（index.html, logo.png, favicon.ico） -->
-    <EmbeddedResource Include="wwwroot\**\*" />
+    <!-- Web 面板静态资源（官方 StarPanel 读取 WebPanel\wwwroot\ 下的嵌入式资源） -->
+    <EmbeddedResource Include="WebPanel\wwwroot\**" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.Agent" Version="10.16.2026.701" />
+    <PackageReference Include="NewLife.Agent" Version="10.16.2026.716-beta1245" />
+    <ProjectReference Include="..\Stardust\Stardust.csproj" />
     <PackageReference Include="ILRepack" Version="2.*" Condition="'$(TargetFramework)'=='net461'">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
   </ItemGroup>
 
+  <!-- ServiceController/ServiceManager 不在 Stardust.csproj 的编译列表中，需链接编译 -->
   <ItemGroup>
-    <ProjectReference Include="..\Stardust\Stardust.csproj" />
+    <Compile Include="..\Stardust\Managers\ServiceController.cs" Link="Managers\ServiceController.cs" />
+    <Compile Include="..\Stardust\Managers\ServiceManager.cs" Link="Managers\ServiceManager.cs" />
   </ItemGroup>
 
   <Import Project="ILRepack.targets" Condition="'$(TargetFramework)'=='net461'" />

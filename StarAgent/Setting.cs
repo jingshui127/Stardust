@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using NewLife.Configuration;
 using NewLife.Remoting.Clients;
 using Stardust.Models;
@@ -12,7 +12,7 @@ public class StarAgentSetting : Config<StarAgentSetting>, IClientSetting
     #region 属性
     /// <summary>调试开关。默认true</summary>
     [Description("调试开关。默认true")]
-    public Boolean Debug { get; set; } = false;
+    public Boolean Debug { get; set; } = true;
 
     /// <summary>证书</summary>
     [Description("证书")]
@@ -30,9 +30,9 @@ public class StarAgentSetting : Config<StarAgentSetting>, IClientSetting
     //[Description("本地服务。默认udp://127.0.0.1:5500")]
     //public String LocalServer { get; set; } = "udp://127.0.0.1:5500";
 
-    /// <summary>本地端口。默认5580</summary>
-    [Description("本地端口。默认5580")]
-    public Int32 LocalPort { get; set; } = 5580;
+    /// <summary>本地端口。默认5500</summary>
+    [Description("本地端口。默认5500")]
+    public Int32 LocalPort { get; set; } = 5500;
 
     /// <summary>更新通道。默认Release</summary>
     [Description("更新通道。默认Release")]
@@ -79,11 +79,50 @@ public class StarAgentSetting : Config<StarAgentSetting>, IClientSetting
     #region 方法
     protected override void OnLoaded()
     {
-        // 不在 OnLoaded 中填充默认示例服务。
-        // OnLoaded 在配置文件成功加载后触发，若 Services 为空（用户清空或解析异常），
-        // 强制填充示例服务会被后续 Save() 持久化，覆盖用户真实配置。
-        // 改为设为空数组，保留用户的空配置状态。
-        Services ??= [];
+        if ((Services == null || Services.Length == 0) && IsNew)
+        {
+            var si = new ServiceInfo
+            {
+                Name = "test",
+                FileName = "ping",
+                Arguments = "newlifex.com",
+
+                Enable = false,
+            };
+            var si2 = new ServiceInfo
+            {
+                Name = "test2",
+                FileName = "cube.zip",
+                Arguments = "urls=http://*:1080",
+                WorkingDirectory = "../sso/web/",
+
+                Enable = false,
+            };
+            var si3 = new ServiceInfo
+            {
+                Name = "StarServer",
+                FileName = "StarServer.zip",
+                Arguments = "StarServer.dll",
+                WorkingDirectory = "../star/server",
+
+                Enable = false,
+            };
+            var si4 = new ServiceInfo
+            {
+                Name = "StarWeb",
+                FileName = "StarWeb.zip",
+                Arguments = "urls=http://*:6680",
+                WorkingDirectory = "../star/web",
+
+                Enable = false,
+            };
+
+            Services = [si, si2, si3, si4];
+        }
+        else
+        {
+            Services ??= [];
+        }
 
         base.OnLoaded();
     }

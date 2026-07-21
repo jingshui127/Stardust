@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.FileProviders;
@@ -15,13 +15,17 @@ using Stardust.Data.Deployment;
 using Stardust.Data.Monitors;
 using Stardust.Data.Nodes;
 using Stardust.Data.Platform;
+using Stardust.Dns;
 using Stardust.Extensions.Caches;
 using Stardust.Models;
 using Stardust.Server;
+using Stardust.Services;
 using Stardust.Server.Services;
 using Stardust.Web.Services;
 using XCode;
 using XCode.DataAccessLayer;
+using Stardust.Dns;
+using Stardust.Services;
 
 namespace Stardust.Web;
 
@@ -60,8 +64,16 @@ public class Startup
         services.AddSingleton<ConfigService>();
         services.AddSingleton<AppOnlineService>();
         services.AddSingleton<DeployService>();
+        services.AddSingleton<PipelineService>();
         services.AddSingleton<HotAppService>();
         services.AddSingleton<NewLife.Cube.Services.TokenService>();
+
+        // DDNS服务
+        services.AddSingleton<IDnsProvider, AliyunDnsProvider>();
+        services.AddSingleton<IDnsProvider, TencentCloudDnsProvider>();
+        services.AddSingleton<IDnsProvider, UCloudDnsProvider>();
+        services.AddSingleton<DnsProviderFactory>();
+        services.AddSingleton<DnsService>();
 
         services.AddCubeFileStorage("Star");
 
@@ -85,11 +97,17 @@ public class Startup
         {
             options.MultipartBodyLengthLimit = Int64.MaxValue;
         });
-        // IIS配置已移除：.NET10中IISServerOptions类型发生变更，且Linux部署不需要IIS配置
-        // services.Configure<IISServerOptions>(options =>
-        // {
-        //     options.MaxRequestBodySize = Int32.MaxValue;
-        // });
+        services.Configure<IISServerOptions>(options =>
+        {
+            options.MaxRequestBodySize = Int32.MaxValue;
+        });
+
+        // DDNS服务
+        services.AddSingleton<IDnsProvider, AliyunDnsProvider>();
+        services.AddSingleton<IDnsProvider, TencentCloudDnsProvider>();
+        services.AddSingleton<IDnsProvider, UCloudDnsProvider>();
+        services.AddSingleton<DnsProviderFactory>();
+        services.AddSingleton<DnsService>();
 
         services.AddControllersWithViews();
         services.AddCube();

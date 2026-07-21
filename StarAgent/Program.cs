@@ -3,6 +3,7 @@ using System.Reflection;
 using NewLife;
 using NewLife.Agent;
 using NewLife.Agent.Models;
+using NewLife.Agent.WebPanel;
 using NewLife.Log;
 using NewLife.Model;
 using NewLife.Remoting;
@@ -13,6 +14,7 @@ using Stardust.Deployment;
 using Stardust.Managers;
 using Stardust.Models;
 using Stardust.Plugins;
+using StarAgent.WebPanel;
 using IHost = NewLife.Agent.IHost;
 using ServiceModel = NewLife.Agent.Models.ServiceModel;
 
@@ -46,15 +48,12 @@ internal class Program
 
         {
             agentConfig.Description = "持续监控应用运行状态，自动重启崩溃服务.科控物联QQ：2492123056";
-            agentConfig.WebPort = 5581;
-            // 禁用 ServiceBase 自动创建 WebPanel，改用 StarAgentWebPanel 继承版
-            agentConfig.EnableWebPanel = false;
             agentConfig.Save();
         }
-        else if (agentConfig.EnableWebPanel)
+        else if (!agentConfig.EnableWebPanel)
         {
-            // 确保旧版本升级后也禁用自动创建
-            agentConfig.EnableWebPanel = false;
+            // 旧版本可能禁用了 WebPanel，重新启用以使用 CreateWebPanel 继承版
+            agentConfig.EnableWebPanel = true;
             agentConfig.Save();
         }
         var set = StarSetting.Current;
@@ -160,6 +159,16 @@ internal class MyService : ServiceBase, IServiceProvider
         // ServiceBase 会根据 StarAgent.config 的 WebPort 配置自动创建 WebPanel
     }
 
+    #region Web 面板
+    /// <summary>创建 Web 管理面板。重写以返回 StarPanel，复用官方功能并扩展自定义面板</summary>
+    /// <param name="service">所属服务</param>
+    /// <returns></returns>
+    protected override AgentWebPanel CreateWebPanel(ServiceBase service)
+    {
+        return new StarPanel(service);
+    }
+    #endregion
+
     #region 服务控制
     protected override void Init()
     {
@@ -238,7 +247,6 @@ internal class MyService : ServiceBase, IServiceProvider
     private PluginManager _PluginManager;
     //private String _lastVersion;
     private AliyunDnsClient? _AliyunDns;
-    private new StarAgent.WebPanel.StarAgentWebPanel? _webPanel;
 
     #region 调度核心
     /// <summary>服务启动</summary>
@@ -280,8 +288,7 @@ internal class MyService : ServiceBase, IServiceProvider
         // 监听端口，用于本地通信
         if (set.LocalPort > 0) StartLocalServer(set.LocalPort);
 
-        // 启动自建 Web 管理面板（独立于 NewLife.Agent.WebPanel，强类型操作 StarAgentSetting）
-        StartWebPanel();
+        // Web 面板由 ServiceBase 基类通过 CreateWebPanel() 自动创建和启动，无需手动调用
 
         // 启动星尘客户端，连接服务端
         StartClient();
@@ -320,22 +327,6 @@ internal class MyService : ServiceBase, IServiceProvider
         base.StartWork(reason);
     }
 
-    /// <summary>启动自建 Web 管理面板（基于 HttpServer，不依赖 NewLife.Agent.WebPanel）</summary>
-    private void StartWebPanel()
-    {
-        try
-        {
-            _webPanel = new StarAgent.WebPanel.StarAgentWebPanel(this);
-            _webPanel.Start();
-
-            WriteLog("StarAgent Web 面板已启动，端口：{0}", _webPanel.Port);
-        }
-        catch (Exception ex)
-        {
-            XTrace.WriteException(ex);
-        }
-    }
-
     private void OnSettingChanged(Object? sender, EventArgs eventArgs)
     {
         WriteLog("重新加载应用服务");
@@ -353,11 +344,14 @@ internal class MyService : ServiceBase, IServiceProvider
         var mgrServices = _Manager.Services ?? [];
         var setServices = set.Services ?? [];
 
+        var setSvcMap = setServices
+            .GroupBy(e => e.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
         var changed = false;
         foreach (var mgrSvc in mgrServices)
         {
-            var setSvc = setServices.FirstOrDefault(e => e.Name.EqualIgnoreCase(mgrSvc.Name));
-            if (setSvc != null && setSvc.Enable != mgrSvc.Enable)
+            if (setSvcMap.TryGetValue(mgrSvc.Name, out var setSvc) && setSvc.Enable != mgrSvc.Enable)
             {
                 setSvc.Enable = mgrSvc.Enable;
                 changed = true;
@@ -376,9 +370,7 @@ internal class MyService : ServiceBase, IServiceProvider
     {
         base.StopWork(reason);
 
-        // 停止自建 Web 面板
-        _webPanel?.TryDispose();
-        _webPanel = null;
+        // Web 面板由 ServiceBase 基类自动管理生命周期，无需手动停止
 
         // 停止插件
         WriteLog("停止插件[{0}]", _PluginManager.Identity);

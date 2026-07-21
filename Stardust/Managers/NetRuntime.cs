@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -60,21 +60,12 @@ public class NetRuntime
         var fullFile = fileName;
         if (!String.IsNullOrEmpty(CachePath)) fullFile = Path.Combine(CachePath, fileName);
 
-        // 如果 BaseUrl 是完整文件地址（以 .exe/.msi/.msu 等结尾），提取目录部分
-        var baseDir = BaseUrl;
-        if (!String.IsNullOrEmpty(baseDir))
-        {
-            var lastSegment = baseDir.TrimEnd('/').Substring(baseDir.TrimEnd('/').LastIndexOf('/') + 1);
-            if (lastSegment.Contains('.') && !lastSegment.StartsWith("."))
-                baseDir = baseDir.TrimEnd('/').Substring(0, baseDir.TrimEnd('/').LastIndexOf('/'));
-        }
-
         // 版本相对地址为空，或者主地址已经包含版本相对地址，则直接使用主地址，否则拼接基地址
         if (String.IsNullOrEmpty(baseUrl) ||
-            !String.IsNullOrEmpty(baseDir) && (baseDir.EndsWith(baseUrl) || baseDir.EndsWith(baseUrl + "/")))
-            baseUrl = baseDir?.TrimEnd('/');
+            !String.IsNullOrEmpty(BaseUrl) && (BaseUrl.EndsWith(baseUrl) || BaseUrl.EndsWith(baseUrl + "/")))
+            baseUrl = BaseUrl?.TrimEnd('/');
         else
-            baseUrl = baseDir?.TrimEnd('/') + '/' + baseUrl?.TrimStart('/').TrimEnd('/');
+            baseUrl = BaseUrl?.TrimEnd('/') + '/' + baseUrl?.TrimStart('/').TrimEnd('/');
 
         // 从页面清单初始化哈希表
         if (!baseUrl.IsNullOrEmpty() && !_urls.Contains(baseUrl))

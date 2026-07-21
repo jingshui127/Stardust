@@ -101,62 +101,68 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
     protected Boolean RetrieveExeFile(DeployContext context, String workDir)
     {
         var args = context.Arguments;
-        var service = context.Service;
 
-        var fileName = service?.FileName;
-        FileInfo? runfile = null;
-
-        if (!fileName.IsNullOrEmpty())
+        // 如果没有zip包，直接按FileName处理，无需在工作目录中搜索
+        // 此时FileName可能是系统命令（如ping），也可能是带路径的可执行文件
+        if (context.ZipFile.IsNullOrEmpty())
         {
-            // 没有扩展名的文件名优先作为系统命令处理（通过PATH查找）
-            var hasExt = !Path.GetExtension(fileName).IsNullOrEmpty();
-            if (!hasExt && !fileName.Contains('/') && !fileName.Contains('\\'))
+            var fileName = context.Service?.FileName;
+            if (!fileName.IsNullOrEmpty())
             {
-                context.WriteLog("使用系统命令（无扩展名）：{0}", fileName);
-                context.ExecuteFile = fileName;
-                return true;
-            }
-
-            if (File.Exists(fileName))
-            {
-                runfile = new FileInfo(fileName);
-            }
-            else
-            {
-                var fullPath = Path.Combine(workDir, fileName);
-                if (File.Exists(fullPath))
+                if (!fileName.Contains('/') && !fileName.Contains('\\'))
                 {
-                    runfile = new FileInfo(fullPath);
+                    // 不含路径分隔符的简单命令名（如ping），直接作为系统命令通过PATH解析
+                    context.WriteLog("使用系统命令：{0}", fileName);
+                    context.ExecuteFile = fileName;
+                    context.Arguments = args;
+                    return true;
                 }
-            }
 
-            // 系统命令（无路径分隔符，通过PATH查找）
-            if (runfile == null && !fileName.Contains('/') && !fileName.Contains('\\'))
-            {
-                context.WriteLog("使用系统命令：{0}", fileName);
-                context.ExecuteFile = fileName;
-                return true;
-            }
-
-            // 指定路径但文件不存在时，尝试提取文件名通过PATH查找
-            if (runfile == null && (fileName.Contains('/') || fileName.Contains('\\')))
-            {
-                var justName = Path.GetFileName(fileName);
-                if (!justName.IsNullOrEmpty() && !justName.Contains('/') && !justName.Contains('\\'))
+                // 含路径的FileName，直接检查文件是否存在
+                var fullPath = fileName.GetFullPath();
+                var fi = fullPath.AsFile();
+                if (fi != null && fi.Exists)
                 {
-                    context.WriteLog("指定路径不存在，尝试通过PATH查找：{0}", justName);
-                    context.ExecuteFile = justName;
+                    context.ExecuteFile = fi.FullName;
+                    context.Arguments = args;
                     return true;
                 }
             }
+
+            context.WriteLog("无法找到可执行文件");
+            return false;
         }
+
+        // 有zip包时，解压后在工作目录中查找可执行文件
+        var runfile = FindExeFile(workDir, context.Name, ref args);
 
         if (runfile == null)
         {
-            runfile = FindExeFile(workDir, context.Name, ref args);
-        }
-        if (runfile == null)
-        {
+            // 按服务名找不到时，检查FileName。有两种情况：
+            // 1. 不含路径分隔符的简单命令名（如ping），直接作为系统命令通过PATH解析
+            // 2. 含路径分隔符，直接检查文件是否存在
+            var fileName = context.Service?.FileName;
+            if (!fileName.IsNullOrEmpty())
+            {
+                if (!fileName.Contains('/') && !fileName.Contains('\\'))
+                {
+                    context.WriteLog("使用系统命令：{0}", fileName);
+                    context.ExecuteFile = fileName;
+                    context.Arguments = args;
+                    return true;
+                }
+
+                // 含路径的FileName，直接检查文件是否存在
+                var fullPath = fileName.GetFullPath();
+                var fi = fullPath.AsFile();
+                if (fi != null && fi.Exists)
+                {
+                    context.ExecuteFile = fi.FullName;
+                    context.Arguments = args;
+                    return true;
+                }
+            }
+
             context.WriteLog("无法找到可执行文件");
             return false;
         }
@@ -256,76 +262,19 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
         return runfile;
     }
 
-    /// <summary>判断是否为系统命令（无路径分隔符，通过PATH查找）</summary>
-    /// <param name="fileName">文件名</param>
-    /// <returns>是否为系统命令</returns>
-    protected static Boolean IsSystemCommand(String? fileName)
-    {
-        if (fileName.IsNullOrEmpty()) return false;
-        return !fileName.Contains(Path.DirectorySeparatorChar) && !fileName.Contains(Path.AltDirectorySeparatorChar);
-    }
-
-    /// <summary>通过PATH查找可执行文件</summary>
-    /// <param name="fileName">文件名</param>
-    /// <returns>完整路径，找不到返回null</returns>
-    protected static String? FindInPath(String fileName)
-    {
-        if (fileName.IsNullOrEmpty()) return null;
-
-        if (fileName.Contains(Path.DirectorySeparatorChar) || fileName.Contains(Path.AltDirectorySeparatorChar))
-            return File.Exists(fileName) ? fileName : null;
-
-        var paths = Environment.GetEnvironmentVariable("PATH")?.Split(Path.PathSeparator) ?? [];
-        var exts = Runtime.Windows 
-            ? Environment.GetEnvironmentVariable("PATHEXT")?.Split(';') ?? [".EXE", ".CMD", ".BAT"]
-            : [];
-
-        foreach (var dir in paths)
-        {
-            if (dir.IsNullOrEmpty()) continue;
-            var fullPath = Path.Combine(dir, fileName);
-            if (File.Exists(fullPath)) return fullPath;
-
-            if (Runtime.Windows)
-            {
-                foreach (var ext in exts)
-                {
-                    if (ext.IsNullOrEmpty()) continue;
-                    var fullPathExt = fullPath + ext;
-                    if (File.Exists(fullPathExt)) return fullPathExt;
-                }
-            }
-        }
-
-        return null;
-    }
-
     /// <summary>构建进程启动信息</summary>
     /// <param name="context">部署上下文</param>
-    /// <param name="runFile">可执行文件，系统命令时为null</param>
+    /// <param name="runFile">可执行文件</param>
     /// <returns>进程启动信息</returns>
-    protected ProcessStartInfo BuildProcessStartInfo(DeployContext context, FileInfo? runFile)
+    protected ProcessStartInfo BuildProcessStartInfo(DeployContext context, FileInfo runFile)
     {
         var service = context.Service;
         var workDir = context.WorkingDirectory;
         var arguments = context.Arguments ?? "";
-        var execFile = runFile?.FullName ?? context.ExecuteFile ?? "";
-
-        // 系统命令需要通过PATH查找实际路径
-        var isSysCmd = runFile == null && IsSystemCommand(execFile);
-        if (isSysCmd)
-        {
-            var foundPath = FindInPath(execFile);
-            if (!foundPath.IsNullOrEmpty())
-            {
-                execFile = foundPath;
-                runFile = new FileInfo(execFile);
-            }
-        }
 
         var si = new ProcessStartInfo
         {
-            FileName = execFile,
+            FileName = runFile.FullName,
             Arguments = arguments,
             WorkingDirectory = workDir,
 
@@ -343,39 +292,28 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
             si.RedirectStandardOutput = true;
         }
 
-        // 注入星尘监控（仅对文件型可执行文件有效）
-        if (context.StartupHook && runFile != null) SetStartupHook(context, runFile, service, si);
+        // 注入星尘监控
+        if (context.StartupHook) SetStartupHook(context, runFile, service, si);
 
         // 设置应用标识。目标应用将使用该标识连接星尘服务端，实现一份应用程序以多个应用身份运行，比如魔方以cube/cube2/cube3等身份运行
         if (!context.AppId.IsNullOrEmpty())
             si.EnvironmentVariables["StarAppId"] = context.AppId;
 
         // 处理dll和jar文件
-        if (runFile != null && runFile.Extension.EqualIgnoreCase(".dll"))
+        if (runFile.Extension.EqualIgnoreCase(".dll"))
         {
             si.FileName = "dotnet";
             si.Arguments = arguments.IsNullOrEmpty() ? runFile.FullName : $"{runFile.FullName} {arguments}";
         }
-        else if (runFile != null && runFile.Extension.EqualIgnoreCase(".jar"))
+        else if (runFile.Extension.EqualIgnoreCase(".jar"))
         {
             si.FileName = "java";
             si.Arguments = arguments.IsNullOrEmpty() ? $"-jar {runFile.FullName}" : $"-jar {runFile.FullName} {arguments}";
         }
-        else if (runFile != null && Runtime.Windows)
-        {
-            // Windows下.cmd/.bat需要通过cmd.exe运行
-            var ext = runFile.Extension;
-            if (ext.EqualIgnoreCase(".cmd", ".bat"))
-            {
-                si.FileName = "cmd.exe";
-                si.Arguments = $"/c \"{runFile.FullName}\" {arguments}";
-            }
-        }
         else if (Runtime.Linux)
         {
             // Linux下，需要给予可执行权限
-            if (runFile != null)
-                Process.Start("chmod", $"+x {runFile.FullName}")?.WaitForExit(5_000);
+            Process.Start("chmod", $"+x {runFile.FullName}")?.WaitForExit(5_000);
         }
 
         // 环境变量。不能用于ShellExecute
@@ -385,6 +323,19 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
             {
                 if (!item.Key.IsNullOrEmpty())
                     si.EnvironmentVariables[item.Key] = item.Value;
+            }
+        }
+
+        // 根据 MaxMemory 设置 .NET GC 堆硬上限
+        // DOTNET_GCHeapHardLimit 让 GC 主动控制堆大小不超过限制，跨平台有效
+        if (service.MaxMemory > 0)
+        {
+            // 仅对 .NET 应用（dotnet 运行时 或 .dll 文件）
+            if (si.FileName.EqualIgnoreCase("dotnet") ||
+                (runFile.Extension?.EqualIgnoreCase(".dll") == true))
+            {
+                var bytes = (UInt64)service.MaxMemory * 1024 * 1024;
+                si.EnvironmentVariables["DOTNET_GCHeapHardLimit"] = bytes.ToString("x");
             }
         }
 
@@ -416,6 +367,14 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
     {
         var service = context.Service;
         var user = service.UserName;
+
+        // 工作目录不存在时回退到当前目录，避免 Win32Exception 267（目录名称无效）
+        if (!si.WorkingDirectory.IsNullOrEmpty() && !Directory.Exists(si.WorkingDirectory))
+        {
+            var fallback = Environment.CurrentDirectory;
+            context.WriteLog("工作目录不存在：{0}，回退到：{1}", si.WorkingDirectory, fallback);
+            si.WorkingDirectory = fallback;
+        }
 
         context.WriteLog("工作目录: {0}", si.WorkingDirectory);
         context.WriteLog("启动文件: {0}", si.FileName);
@@ -524,6 +483,44 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
         }
 
         context.WriteLog("启动成功！PID={0}/{1}", p.Id, p.ProcessName);
+        return p;
+    }
+
+    /// <summary>作为系统命令执行。文件不存在时通过PATH解析，如ping等系统命令</summary>
+    /// <param name="context">部署上下文</param>
+    /// <returns>启动的进程</returns>
+    protected Process? ExecuteCommand(DeployContext context)
+    {
+        context.WriteLog("执行命令 {0} {1}", context.ExecuteFile, context.Arguments);
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = context.ExecuteFile,
+            Arguments = context.Arguments ?? "",
+            WorkingDirectory = context.WorkingDirectory,
+            UseShellExecute = false,
+        };
+
+        Process? p = null;
+        try
+        {
+            p = Process.Start(psi);
+            if (p != null)
+            {
+                context.WriteLog("启动成功！PID={0}", p.Id);
+
+                // OOM分值。Linux下子进程默认继承父进程（StarAgent）的 -1000，需重置为普通进程
+                var oomScore = context.Service?.OomScoreAdjust ?? 0;
+                if (Runtime.Linux && oomScore != -1000)
+                    StarClient.SetOomScoreAdj(p.Id, oomScore);
+            }
+        }
+        catch (Exception ex)
+        {
+            context.LastError = ex.Message;
+            context.WriteLog("执行命令失败：{0}", ex.Message);
+        }
+
         return p;
     }
     #endregion
