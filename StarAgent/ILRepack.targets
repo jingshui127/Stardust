@@ -3,7 +3,7 @@
   <Target Name="ILRepack" AfterTargets="Build" Condition="'$(TargetFramework)'=='net461'">
     <PropertyGroup>
       <OutputPathFull>$(TargetDir)</OutputPathFull>
-      <ILRepackPath>$(NuGetPackageRoot)ilrepack\2.1.0-beta1\tools\ILRepack.exe</ILRepackPath>
+      <ILRepackPath>$(NuGetPackageRoot)ilrepack\2.0.44\tools\ILRepack.exe</ILRepackPath>
     </PropertyGroup>
     <ItemGroup>
       <InputAssemblies Include="$(OutputPathFull)StarAgent.exe" />
