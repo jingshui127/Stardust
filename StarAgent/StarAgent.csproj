@@ -7,7 +7,7 @@
     <Description>持续监控你的应用，如果应用崩溃、卡顿或停止，会自动重启。它非常适合让非服务应用在后台运行，并确保它们在系统启动时自动启动，甚至在登录前就启动，无需重写为服务。QQ:2492123056</Description>
     <Company>科控物联</Company>
     <Copyright>©2002-2026 TC</Copyright>
-    <VersionPrefix>3.7</VersionPrefix>
+    <VersionPrefix>3.10</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
     <FileVersion>$(Version)</FileVersion>
