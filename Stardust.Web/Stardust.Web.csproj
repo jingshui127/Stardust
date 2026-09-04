@@ -17,7 +17,7 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <NoWarn>1701;1702;NU5104;NETSDK1138;CS7035</NoWarn>
+    <NoWarn>1701;1702;NU5104;NETSDK1138;CS7035;CS4014;CS8632;CS9113</NoWarn>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(TargetFramework)'=='net8.0'">
@@ -28,16 +28,6 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     <StackTraceSupport>false</StackTraceSupport>-->
   </PropertyGroup>
-
-  <ItemGroup>
-    <Compile Remove="Areas\Configs\Controllers\AppQuoteController.cs" />
-    <Compile Remove="Areas\Configs\Controllers\ConfigOnlineController.cs" />
-    <Compile Remove="Areas\Deployment\Controllers\AppDeployOnlineController.cs" />
-    <Compile Remove="Areas\Deployment\Controllers\AppDeployResourceController.cs" />
-    <Compile Remove="Areas\Deployment\Controllers\AppResourceController.cs" />
-    <Compile Remove="Areas\Deployment\Controllers\AppResourceVersionController.cs" />
-    <Compile Remove="Areas\Deployment\Controllers\AttachmentController.cs" />
-  </ItemGroup>
 
   <ItemGroup>
     <Compile Include="..\Stardust.Server\Services\ApolloService.cs" Link="Services\ApolloService.cs" />
@@ -51,14 +41,16 @@
     <Compile Include="..\Stardust.Server\Services\RedisService.cs" Link="Services\RedisService.cs" />
     <Compile Include="..\Stardust.Server\Services\TraceItemStatService.cs" Link="Services\TraceItemStatService.cs" />
     <Compile Include="..\Stardust.Server\Services\TraceStatService.cs" Link="Services\TraceStatService.cs" />
+    <Compile Include="..\Stardust.Server\Services\DnsProviderFactory.cs" Link="Services\DnsProviderFactory.cs" />
+    <Compile Include="..\Stardust.Server\Services\DnsService.cs" Link="Services\DnsService.cs" />
     <Compile Include="..\Stardust.Server\Setting.cs" Link="Setting.cs" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.Cube.Core" Version="6.9.2026.318-beta1121" />
-    <PackageReference Include="NewLife.IP" Version="2.4.2026.102" />
-    <PackageReference Include="NewLife.Redis" Version="6.5.2026.303" />
-    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.7.2026.402" />
+    <PackageReference Include="NewLife.Cube.Core" Version="6.14.2026.830-beta1625" />
+    <PackageReference Include="NewLife.IP" Version="2.5.2026.804" />
+    <PackageReference Include="NewLife.Redis" Version="6.6.2026.901" />
+    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.9.2026.901" />
   </ItemGroup>
 
   <ItemGroup>

@@ -36,14 +36,12 @@
     <Compile Remove="Configs\应用依赖.cs" />
     <Compile Remove="Configs\配置在线.Biz.cs" />
     <Compile Remove="Configs\配置在线.cs" />
-    <Compile Remove="Deployment\应用资源.Biz.cs" />
-    <Compile Remove="Deployment\应用资源.cs" />
     <Compile Remove="Deployment\部署在线.Biz.cs" />
     <Compile Remove="Deployment\部署在线.cs" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.XCode" Version="11.25.2026.326-beta1217" />
+    <PackageReference Include="NewLife.XCode" Version="12.1.2026.801" />
   </ItemGroup>
 
   <ItemGroup>

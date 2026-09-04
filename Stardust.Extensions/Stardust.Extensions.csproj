@@ -7,7 +7,7 @@
     <Description>星尘分布式服务框架ASP.NET Core扩展库。提供AddStardust、UseStardust、RegisterService、ConsumeService等中间件与便捷方法，简化服务注册发现与监控接入，支持Web/API应用快速集成星尘平台。</Description>
     <Company>新生命开发团队</Company>
     <Copyright>©2002-2026 NewLife</Copyright>
-    <VersionPrefix>3.7</VersionPrefix>
+    <VersionPrefix>3.10</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
     <FileVersion>$(Version)</FileVersion>
@@ -33,7 +33,7 @@
     <RepositoryUrl>https://github.com/NewLifeX/Stardust</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>新生命团队;X组件;NewLife;$(AssemblyName)</PackageTags>
-    <PackageReleaseNotes>新增服务健康检查能力；部署时支持自动放行防火墙端口；优化健康检查Http连接复用与超时控制；增强分布式文件存储事件总线初始化并兼容旧版Redis；重构Http扩展与响应头处理</PackageReleaseNotes>
+    <PackageReleaseNotes>MCP端点重构为中间件实现并升级ModelContextProtocol SDK至2.0，支持Streamable HTTP、协议版本协商、通知与ping心跳；资源/模块类型枚举化统一大小写命名，修复授权静默失效；流水线编译后自动部署支持克制节点选择，未勾选节点标记Failed杜绝假成功；文件存储哈希广播时序优化与IO异常容错；注册缺失的Web服务并支持分片日志搜索；升级NewLife核心依赖至2026.09.01正式版</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
@@ -47,12 +47,6 @@
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Compile Remove="RegistryMiddleware.cs" />
-    <Compile Remove="StarService.cs" />
-    <Compile Remove="WebHelper.cs" />
   </ItemGroup>
 
   <ItemGroup>

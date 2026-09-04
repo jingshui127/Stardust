@@ -1,5 +1,156 @@
 # 星尘（Stardust）版本历史
 
+## v3.10.2026.0901 (2026-09-01)
+
+### MCP 能力增强
+- **MCP 中间件重构**：MCP 端点由控制器改为中间件实现（`McpMiddleware`），在 Cube 前短路 `/mcp` 请求，升级 ModelContextProtocol SDK 至 2.0，实现 Streamable HTTP 兼容
+- **协议版本协商**：新增 MCP 协议版本协商（支持 2024-11-05 至 2026-07-28），支持 notifications 通知与 ping 心跳，处理结果包装为 `McpHandleResult`
+- **资源/模块类型枚举化**：新增 `McpResourceType` / `McpModuleType` 枚举，统一存储（大驼峰）与协议（小写）命名，修复授权因大小写不匹配静默失效的根因
+- **兼容与健壮性**：Token 授权读取侧 `EqualIgnoreCase` 兼容历史小写数据；审计日志与 Token 调用统计异常不影响主响应
+
+### 流水线部署增强
+- **编译后自动部署**：流水线 Build 成功后按 `AutoDeploy` 判定续发部署，补全 `AppDeployHistory` 关键日志（编译完成/使用版本/自动部署判定/部署下发/失败）
+- **克制原则**：仅部署页面勾选的节点，未勾选任何节点则不下发、不回退，标记 run 为 Failed，杜绝"上传完成即假成功"
+- **字段修正**：`DeployNodeIds` 字段描述修正为逗号分隔，移除视图残留调试断点
+
+### 文件存储一致性
+- **哈希广播时序**：AppDeployVersion 识别与注入逻辑迁移至 `OnFileSaved`，确保广播前附件哈希已更新，提升分布式一致性
+- **健壮性增强**：`CheckLocalFile` 增加 IOException 捕获，文件通知流程支持延迟重试，避免文件占用误判
+- **NuGet 审计**：`Directory.Build.props` 统一关闭 NuGet 审计，避免网络慢时 restore 超时
+
+### Web 服务注册与日志
+- **服务注册补全**：`Startup` 注册缺失的 `HttpClientFactory` 与 `MySqlService` 后台服务
+- **分片日志搜索**：AppClientLog 支持按应用/线程过滤，默认查询最近 24 小时，适配节点心跳间隔
+
+### 依赖升级与框架调整
+- **核心依赖升级**：NewLife.Core/Redis/Remoting/Remoting.Extensions 升级至 2026.09.01 正式版，消除包降级编译冲突
+- **魔方引用**：`NewLife.Cube.Core` 切回 NuGet 引用（6.14 beta），移除开发期硬编码本地项目路径
+- **测试依赖升级**：Microsoft.NET.Test.Sdk 18.9、xunit.runner.visualstudio 4.0、TestHost 10.0.11
+- **AgentExpansion 框架调整**：改为插件库（net45;netstandard2.0，输出 `Bin\Agent`），SSH.NET 升级至 2026.0.0，移除命令行入口
+
+### Bug 修复
+- **[fix] 编译失败**：修复 AgentExpansion 引用 `NewLife.Remoting 3.9.2026.801` 与传递依赖 `3.9.2026.901` 冲突导致的 NU1605 包降级错误
+- **[fix] 重复 using**：移除 `Startup.cs` 重复的 `Stardust.Dns` / `Stardust.Services` 引用（CS0105）
+- **[fix] 配置格式**：修正 `appsettings.json` ConnectionStrings 缩进错乱
+
+---
+
+## v3.10.2026.0802 (2026-08-02)
+
+### StarGateway 网关 v2.0
+- **网关全面升级**：重构 StarGateway 至 v2.0，统一证书管理、完善配置链与文档
+- **动态路由引擎**：新增数据模型与动态路由引擎，支持负载均衡、健康检查与配置多级兜底
+- **安全与 TLS**：支持 TLS 终止、Header 匹配与安全管理功能，增强网关防护
+- **WebSocket 代理**：新增 WebSocket 代理，优化长连接性能与日志管理
+- **静态文件托管**：新增静态文件路由，支持 Range/304/缓存/安全头/SPA 回退与大文件保护
+- **APM 追踪集成**：集成 APM 追踪，修复 Span 资源泄露，支持请求头路由匹配
+- **管理界面**：新增 Admin API、访问日志、运行指标与生产级管理界面
+
+### 流水线与部署增强
+- **流水线功能**：新增流水线及运行/步骤模型，支持 webhook 触发与 Gitea 兼容解析
+- **仓库认证增强**：仓库配置支持 SSH 密钥与用户名密码，提升私有仓库兼容性
+- **部署日志细化**：DeployAgent 按真实动作逐条上报部署日志，支持安装部署
+- **上传与内存优化**：上传文件大小限制提升至 1GB；改用 PrivateMemory 判断内存超限，优化 GC 清理频率
+- **部署稳定性**：确保工作目录存在，避免 Linux 下文件不存在异常
+
+### DDNS 动态域名解析
+- **DDNS 支持**：引入 DDNS 能力，支持多主流 DNS 供应商自动同步
+- **凭据匹配优化**：重构 DNS 凭据匹配逻辑，UCloud 供应商改用弱类型配置获取
+
+### StarAgent Web 管理面板
+- **Web 管理面板**：新增 StarAgent Web 管理面板，支持服务管理、释放内存与修改密码
+- **环境变量记录**：记录并输出应用启动注入的环境变量，便于排查问题
+
+### SDK 与核心优化
+- **SDK 全面优化**：修复事件总线死代码与进程句柄泄漏，增强并发安全，优化心跳性能
+- **UDP RPC 调用**：本地服务管理切换为 UDP RPC 调用 StarAgent
+- **WebSocket 字段统一**：统一为 LongLink 字段，新增 LoginTime，优化在线时长结算
+- **StarApi 增强**：增加运行时与架构信息，过滤虚拟/调试网卡，路由规范化
+- **机器信息获取**：改进机器信息获取，避免执行 wmic.exe
+
+### 运行时与 MCP
+- **dotNet 推送优化**：新增 GLIBC 版本、节点版本与操作系统兼容性检查，优化同步逻辑
+- **MCP 功能**：新增 MCP 能力，支持智能体交互扩展
+
+### Bug 修复
+- **[fix] 分页排序**：修复 AppService Search 分页查询缺少默认排序抛异常
+- **[fix] 空引用**：修复 SendRemote 多线程下可能的空引用问题
+- **[fix] 网关稳定性**：为 HttpReverseProxy/HttpReverseSession 添加异常保护，修复会话状态序列化
+- **[fix] 参数匹配**：修复 GatewayRoute.Search 参数不匹配与 AppOnline.WebSocket 属性缺失
+- **[fix] 日志噪音**：修复 Linux 无 WiFi 设备与 OOM 分值调整日志噪音
+- **[fix] 配置同步**：修复 OnServiceChanged 覆盖整个 Services 数组的问题
+
+### 文档与测试
+- **文档体系重构**：统一模块编号命名，新增需求/功能清单/架构核心文档
+- **测试补充**：补充 App/AlarmGroup/TraceData/RedisData 实体 CRUD 测试
+
+---
+
+## v3.9.2026.0707 (2026-07-07)
+
+### .NET 运行时自动安装与升级
+- **产品版本管理**：新增产品版本、发布包、dotNet 安装包三张数据表及完整升级逻辑，支持 .NET 运行时多版本管理
+- **自动同步服务**：新增 `DotNetSyncService`，自动同步官方 .NET 发布信息并支持动态调整同步周期
+- **冒烟测试与回滚**：增强升级重启流程，支持冒烟测试与自动回滚，保障升级安全
+
+### 进程管理增强
+- **OOM 分值调整**：新增 OOM 分值调整逻辑，支持 Linux 下进程优先级控制（`oom_score_adj`）
+
+### 追踪与监控优化
+- **追踪解析器优化**：优化 `StarTracerResolver`，增强埋点名称解析逻辑，支持高并发场景下的线程安全处理
+- **心跳检测异步缓存**：心跳网络质量检测改用异步缓存，减少阻塞，提升性能
+
+### 命令与消息优化
+- **命令下发去重优化**：服务端不再过滤重复命令，由客户端自行处理，提升命令下发可靠性
+- **Remoting 依赖升级**：升级 Remoting 依赖，增强升级与链路追踪日志
+- **ClientBase 优化**：首次自动更新定时器执行时间调整为 15 秒，WebSocket 连接建立后立即执行
+- **[fix] 命令查询排序**：节点命令查询中的 Id 排序由升序改为降序，优先返回最新命令
+
+### 代码质量与项目结构
+- **可空类型检查**：全面开启可空引用类型检查，升级依赖并优化警告处理
+- **项目结构清理**：大规模清理冗余代码与模型，移除已废弃的服务实现，优化项目结构
+- **TrimSuffix 替换**：将 `TrimEnd` 替换为 `TrimSuffix`，语义更清晰
+- **服务方法可空化**：调整服务方法参数为可空类型，优化命令响应机制
+
+### 文档与设计
+- **指令下发架构文档**：新增指令下发全链路架构分析文档
+- **设计原型**：新增 Dashboard、节点管理、监控、部署等 HTML 设计原型
+
+---
+
+## v3.8.2026.0602 (2026-06-02)
+
+### 链路追踪增强
+- **TraceAnonymous匿名访问**：新增 `TraceAnonymous` 属性，允许未登录用户访问调用链页面，适用于公开展示或演示场景
+
+### 事件总线升级
+- **接口异步化**：`GetEventBus` 重命名为 `CreateEventBus`，`Subscribe`/`Unsubscribe` 全面支持异步，提升高并发场景下的响应能力
+- **追踪链路优化**：发布时优化 TraceId 赋值逻辑，增强分布式追踪可观测性；JSON 反序列化兼容 null 值
+
+### 依赖升级
+- 升级 `NewLife.Core`、`NewLife.Redis`、`NewLife.XCode` 等核心依赖至最新版本
+
+---
+
+## v3.7.2026.0501 (2026-05-01)
+
+### 部署增强
+- **[fix] Git部署错误处理**：增强 `DeployWorker` 在 Git 克隆和拉取时的错误处理机制，提升异常情况下的部署稳定性
+- **应用部署配置同步**：更新应用时自动同步关联的部署配置，优化数据库操作以避免不必要的保存
+
+### 数据层优化
+- **SQLite分片库清理**：优化 SQLite 分片库清理与重建逻辑，跳过过小的文件（可能为空库），避免误操作
+- **实体依赖完善**：`Stardust.Data` 增加对 `Stardust.Data.Deployment` 的模块引用，完善实体关联关系
+
+### Bug修复
+- **[fix] RedisQueue反射报错**：修正通过反射使用 `RedisQueue` 时的报错问题
+
+### 依赖升级
+- 升级魔方（Cube）依赖，跟进上游更新
+- 升级前端安全依赖（postcss、follow-redirects、lodash、axios 等），修复已知安全漏洞
+
+---
+
 ## v3.7.2026.0303 (2026-03-03)
 
 ### 新特性

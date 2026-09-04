@@ -19,10 +19,49 @@ Stardust  星尘，轻量级分布式服务框架！
 演示系统：[http://star.newlifex.com](http://star.newlifex.com)
 
 ---
+## 文档索引
+
+### 📋 核心文档（三件套）
+| 文档 | 说明 |
+|------|------|
+| [需求文档](Doc/需求文档.md) | 愿景、核心目标、功能需求、暂缓清单（v3.2） |
+| [功能清单](Doc/功能清单.md) | 全部功能实现/测试/注释状态追踪（v3.2） |
+| [架构设计](Doc/架构设计.md) | 架构文档总索引，链接各组件架构（v3.2） |
+
+### 🏗️ 主要组件架构
+| 文档 | 说明 |
+|------|------|
+| [StarServer 架构](Doc/SVR-StarServer架构.md) | 服务端核心（应用/配置/注册/日志/平台/基础能力） |
+| [NODE-StarAgent 架构](Doc/NODE-StarAgent架构.md) | 节点代理守护/监控/发布 |
+| [SDK-分布式核心SDK架构](Doc/SDK-分布式核心SDK架构.md) | 客户端 SDK（配置/追踪/注册发现） |
+| [APM-监控系统架构](Doc/APM-监控系统架构.md) | APM 监控子系统详细架构 |
+| [PUB-远程发布架构](Doc/PUB-远程发布架构.md) | 远程发布子系统详细架构 |
+| [GW-网关架构](Doc/GW-网关架构.md) | 网关总架构 |
+
+### 🔧 子模块文档
+| 文档 | 说明 |
+|------|------|
+| [NODE-9-指令下发](Doc/NODE-9-指令下发.md) | NODE-9 命令下发流程（WebSocket 双通道） |
+| [APM-3-链路追踪统计](Doc/APM-3-链路追踪统计.md) | APM-3 追踪统计性能瓶颈与优化 |
+| [NODE-15-StarAgent远程部署](Doc/NODE-15-StarAgent远程部署.md) | NODE-15 远程部署方案 |
+| [NODE-16-阿里云DNS动态域名解析](Doc/NODE-16-阿里云DNS动态域名解析.md) | NODE-16 动态域名解析 |
+| [NODE-14-防火墙管理](Doc/NODE-14-防火墙管理.md) | NODE-14 防火墙端口管理 |
+| [PUB-21-分布式文件存储](Doc/PUB-21-分布式文件存储.md) | 文件存储设计 |
+| [PUB-23-流水线部署流程](Doc/PUB-23-流水线部署流程.md) | 流水线编译→上传→部署流程 |
+| [PUB-19-应用包规范](Doc/PUB-19-应用包规范.md) | 应用包格式与规范 |
+| [SVR-8-远程命令执行安全](Doc/SVR-8-远程命令执行安全.md) | 安全方案 |
+| [PUB-20-部署代理](Doc/PUB-20-部署代理.md) | 部署代理使用说明 |
+| [GW-8-网关使用指南](Doc/GW-8-网关使用指南.md) | 网关使用说明 |
+| [NODE-17-进程管理](Doc/NODE-17-进程管理.md) | 进程启动与守护 |
+| [MCP-MCP架构](Doc/MCP-MCP架构.md) | MCP HTTP 服务架构 |
+| [MCP-1-token管理](Doc/MCP-1-token管理.md) | MCP Token 凭证管理 |
+| [MCP-2-action扩展](Doc/MCP-2-action扩展.md) | MCP Action 扩展指南 |
+| [MCP-3-客户端接入](Doc/MCP-3-客户端接入.md) | MCP 客户端接入指南 |
+
 ## 为什么选择星尘 (Why Stardust)
 - 一体化：节点管理 / 配置中心 / 注册中心 / 服务发现 / 全链路追踪 / APM / 日志中心 / 远程发布 / 资源监控 统一模型与界面
 - 超轻量：核心库零第三方重量级依赖，单进程即可运行，自动建库建表
-- 强兼容：同一生态覆盖 .NET Framework 4.5 起至最新 .NET 9，多平台（Windows/Linux/ARM/IoT）
+- 强兼容：同一生态覆盖 .NET Framework 4.5 起至最新 .NET 10，多平台（Windows/Linux/ARM/IoT）
 - 高性能：基于 NewLife.Core & NewLife.Net 等十余年优化积累，网络吞吐与序列化性能优异
 - 极易接入：几行代码完成接入；ASP.NET Core / Console / Service / IoT 边缘统一方式
 - 自带运维：StarAgent 守护进程 + 远程发布 + 指标 & 日志采集，极大降低分布式运维复杂度
@@ -60,7 +99,10 @@ Stardust  星尘，轻量级分布式服务框架！
 7. [x] 服务发现。各业务应用（服务消费者）从注册中心拉取指定服务的提供者信息，分布式调用（不经网关）  
 8. [x] 远程发布。在星尘控制台上发布应用包到多台安装有星尘代理的应用服务器或物联网边缘节点，StarAgent负责拉起并守护进程  
 9. [x] 日志中心。各应用（服务提供者和服务消费者）向中心上报日志数据，统一在星尘Web查看  
-10. [x] 阿里云DNS。StarAgent支持动态域名解析(DDNS)，自动将节点公网IP注册到阿里云DNS，适用于动态IP环境 [详细文档](Doc/阿里云DNS动态域名解析.md)  
+10. [x] 多供应商DNS DDNS。StarAgent支持动态域名解析(DDNS)，自动将节点公网IP注册到DNS（支持阿里云/腾讯云(DNSPod)/优刻得(UDNS)/AWS Route53四家供应商），适用于动态IP环境 [详细文档](Doc/NODE-16-阿里云DNS动态域名解析.md)  
+11. [x] .NET运行时管理。StarServer自动同步官方.NET发布信息，StarAgent支持按需安装.NET运行时版本，配合升级命令实现自动升级与冒烟测试回滚  
+12. [x] 流水线。支持创建流水线及运行/步骤模型，通过 webhook 自动触发构建发布流程，配合仓库 SSH 密钥与用户名密码认证实现自动化部署  
+13. [x] 网关v2.0。StarGateway 重构升级，支持动态路由引擎、负载均衡、健康检查、TLS 终止、WebSocket 代理与静态文件托管（SPA 回退/大文件保护），并集成 APM 追踪
 
 ### 监控中心
 星尘监控介绍 [https://newlifex.com/blood/stardust_monitor](https://newlifex.com/blood/stardust_monitor)  
@@ -70,6 +112,7 @@ Stardust  星尘，轻量级分布式服务框架！
 ![XCode](Doc/调用链.png)  
 关系图
 ![XCode](Doc/关系图.png)  
+调用链页面支持 `TraceAnonymous` 属性，设置后允许未登录用户访问，适用于公开展示或演示场景。  
 
 ---
 ## 组件说明

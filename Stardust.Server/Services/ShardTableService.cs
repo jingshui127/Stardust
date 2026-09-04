@@ -6,19 +6,26 @@ using XCode.DataAccessLayer;
 
 namespace Stardust.Server.Services;
 
-/// <summary>分表管理</summary>
+/// <summary>分表管理。按日序号（01~31）自动管理跟踪数据和采样数据的分表生命周期，支持 SQLite 和 MySQL</summary>
 public class ShardTableService : IHostedService
 {
     private readonly StarServerSetting _setting;
     private readonly ITracer _tracer;
     private TimerX _timer;
     private TimerX _timer2;
+
+    /// <summary>实例化分表管理服务</summary>
+    /// <param name="setting">服务端设置</param>
+    /// <param name="tracer">跟踪器</param>
     public ShardTableService(StarServerSetting setting, ITracer tracer)
     {
         _setting = setting;
         _tracer = tracer;
     }
 
+    /// <summary>启动服务，初始化分表检查和明细清理两个定时器</summary>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>任务</returns>
     public Task StartAsync(CancellationToken cancellationToken)
     {
         // 每小时执行
@@ -28,6 +35,9 @@ public class ShardTableService : IHostedService
         return Task.CompletedTask;
     }
 
+    /// <summary>停止服务，销毁定时器</summary>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>任务</returns>
     public Task StopAsync(CancellationToken cancellationToken)
     {
         _timer2.TryDispose();
@@ -36,6 +46,8 @@ public class ShardTableService : IHostedService
         return Task.CompletedTask;
     }
 
+    /// <summary>执行分表检查。确保 31 张循环天表已创建，SQLite 按天分库、MySQL 按天分表</summary>
+    /// <param name="state">定时器状态参数</param>
     private void DoShardTable(Object state)
     {
         using var span = _tracer?.NewSpan("ShardTable");
@@ -104,6 +116,10 @@ public class ShardTableService : IHostedService
         }
     }
 
+    /// <summary>清理明细数据。按保留期逐分片清理跟踪数据和采样数据</summary>
+    /// <param name="state">定时器状态参数</param>
+    /// <summary>清理明细数据。按保留期逐分片清理跟踪数据和采样数据</summary>
+    /// <param name="state">定时器状态参数</param>
     private void DoClearDetails(Object state)
     {
         var days = _setting.DataRetention;
@@ -149,10 +165,16 @@ public class ShardTableService : IHostedService
                 else
                 {
                     // 该日序号所有数据均已超出保留期，整表清空效率更高
-                    if (isSqlite)
+                    if (isSqlite && days < 31)
                     {
-                        // SQLite：Drop+Recreate 比逐行 Delete 高效，Vacuum 收缩数据库文件
-                        DropAndRecreateSqliteDay(dd);
+                        // SQLite 且保留期小于31天：同日分片库只会保留一轮数据，直接删库重建更高效
+                        DeleteAndRecreateSqliteDay(dd);
+                    }
+                    else if (isSqlite)
+                    {
+                        // SQLite 保留期达到或超过31天时，同一分片库内可能仍有保留窗口内的数据，只能逐行删除
+                        rs += TraceData.DeleteBefore(mostRecent, startTime, 1_000_000);
+                        rs += SampleData.DeleteBefore(mostRecent, startTime, 1_000_000);
                     }
                     else if (_setting.ClearMode != ClearModes.Delete)
                     {
@@ -213,32 +235,53 @@ public class ShardTableService : IHostedService
         return DateTime.MinValue;
     }
 
-    /// <summary>SQLite 整表重建：Drop+Recreate 清空数据，Vacuum 收缩数据库文件</summary>
+    /// <summary>SQLite 整库重建：删除数据库文件后重建两张分表</summary>
     /// <param name="dd">日序号（1~31）</param>
-    static void DropAndRecreateSqliteDay(Int32 dd)
+    static void DeleteAndRecreateSqliteDay(Int32 dd)
     {
         var dalTrace = DAL.Create($"Trace{dd:00}");
-        using var showSql = dalTrace.Session.SetShowSql(true);
         try
         {
-            dalTrace.Execute($"Drop Table If Exists TraceData_{dd:00}");
-            dalTrace.Execute($"Drop Table If Exists SampleData_{dd:00}");
+            var builder = new ConnectionStringBuilder(dalTrace.ConnStr);
+            var dbfile = builder["Data Source"] + "";
+            var file = dbfile.GetFullPath();
+            if (file.IsNullOrEmpty()) return;
 
-            var table1 = TraceData.Meta.Table.DataTable.Clone() as IDataTable;
-            table1.TableName = $"TraceData_{dd:00}";
-            var table2 = SampleData.Meta.Table.DataTable.Clone() as IDataTable;
-            table2.TableName = $"SampleData_{dd:00}";
-            dalTrace.Db.CreateMetaData().SetTables(Migration.On, [table1, table2]);
+            var fi = file.AsFile();
+            if (!fi.Exists) return;
 
-            // 收缩数据库文件，释放清空后的磁盘空间
-            dalTrace.Execute("VACUUM");
+            // 太小的文件可能是空库，不管它
+            if (fi.Length < 1_000_000) return;
+
+            XTrace.WriteLine("SQLite分片库[{0}]已过期，删除数据库文件：{1}", dd, file);
+            File.Delete(file);
+
+            RebuildSqliteDayTables(dalTrace, dd);
+            XTrace.WriteLine("SQLite分片库[{0}]已重建", dd);
         }
         catch (Exception ex)
         {
             XTrace.WriteException(ex);
+            XTrace.WriteLine("重建SQLite分片库[{0}]失败", dd);
         }
     }
 
+    /// <summary>重建SQLite分片库中的两张循环天表</summary>
+    /// <param name="dalTrace">分片库连接</param>
+    /// <param name="dd">日序号（1~31）</param>
+    static void RebuildSqliteDayTables(DAL dalTrace, Int32 dd)
+    {
+        var table1 = TraceData.Meta.Table.DataTable.Clone() as IDataTable;
+        table1.TableName = $"TraceData_{dd:00}";
+
+        var table2 = SampleData.Meta.Table.DataTable.Clone() as IDataTable;
+        table2.TableName = $"SampleData_{dd:00}";
+
+        dalTrace.Db.CreateMetaData().SetTables(Migration.On, [table1, table2]);
+    }
+
+    /// <summary>删除旧版按完整日期命名的分表（yyyyMMdd 格式），迁移到循环天表（01~31）</summary>
+    /// <param name="dal">数据库访问层</param>
     static void DropOldTable(DAL dal)
     {
         using var showSql = dal.Session.SetShowSql(true);

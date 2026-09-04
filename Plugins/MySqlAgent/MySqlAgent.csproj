@@ -17,10 +17,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <IsPackable>False</IsPackable>
+    <NoWarn>1701;1702;CS8632;CS0169</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.XCode" Version="11.25.2026.304-beta0242" />
+    <PackageReference Include="NewLife.XCode" Version="12.1.2026.801" />
   </ItemGroup>
 
   <ItemGroup>
