@@ -16,6 +16,7 @@
       <InputAssemblies Include="$(OutputPathFull)System.Numerics.Vectors.dll" />
       <InputAssemblies Include="$(OutputPathFull)System.Runtime.CompilerServices.Unsafe.dll" />
       <InputAssemblies Include="$(OutputPathFull)System.ValueTuple.dll" />
+      <InputAssemblies Include="$(OutputPathFull)System.Threading.Tasks.Extensions.dll" />
       <InputPdbs Include="$(OutputPathFull)StarAgent.pdb" />
       <InputPdbs Include="$(OutputPathFull)NewLife.Agent.pdb" />
       <InputPdbs Include="$(OutputPathFull)NewLife.Core.pdb" />
@@ -26,11 +27,13 @@
       <InputPdbs Include="$(OutputPathFull)System.Numerics.Vectors.pdb" />
       <InputPdbs Include="$(OutputPathFull)System.Runtime.CompilerServices.Unsafe.pdb" />
       <InputPdbs Include="$(OutputPathFull)System.ValueTuple.pdb" />
+      <InputPdbs Include="$(OutputPathFull)System.Threading.Tasks.Extensions.pdb" />
     </ItemGroup>
     <Exec Command="&quot;$(ILRepackPath)&quot; /out:&quot;$(OutputPathFull)StarAgent.merged.exe&quot; /target:exe /targetplatform:v4 /internalize /ndebug @(InputAssemblies->'&quot;%(FullPath)&quot;', ' ')" />
     <Delete Files="@(InputAssemblies)" />
     <Delete Files="@(InputPdbs)" />
     <Delete Files="$(OutputPathFull)StarAgent.exe.config" />
+    <Delete Files="$(OutputPathFull)StarAgent.merged.exe.config" />
     <Move SourceFiles="$(OutputPathFull)StarAgent.merged.exe" DestinationFiles="$(OutputPathFull)StarAgent.exe" />
   </Target>
 </Project>

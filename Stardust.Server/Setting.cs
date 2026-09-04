@@ -160,7 +160,7 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
 
     /// <summary>可控节点为空时放行。AllowControlNodes为空时是否允许操作，默认false（安全模式，需显式配置可控节点）。内部环境可设为true以兼容旧数据</summary>
     [Description("可控节点为空时放行。AllowControlNodes为空时是否允许操作，默认false（安全模式，需显式配置可控节点）。内部环境可设为true以兼容旧数据")]
-    public Boolean AllowControlNodesWhenEmpty { get; set; }
+    public Boolean AllowControlNodesWhenEmpty { get; set; } = true;
 
     /// <summary>启用MCP服务。默认关闭，启用后暴露 POST /mcp 端点供 LLM/智能体调用</summary>
     [Description("启用MCP服务。默认关闭，启用后暴露 POST /mcp 端点供 LLM/智能体调用")]
