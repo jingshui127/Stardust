@@ -20,7 +20,7 @@ namespace StarAgent.CommandHandler
             Console.WriteLine("请输入新的服务端：");
 
             var addr = Console.ReadLine();
-            if (String.IsNullOrEmpty(addr)) addr = "http://127.0.0.1:6600";
+            if (String.IsNullOrEmpty(addr)) addr = "http://47.113.219.65:6600";
 
             set.Server = addr;
             set.Save();

@@ -43,9 +43,7 @@ internal class Program
         var set = StarSetting.Current;
         if (set.IsNew)
         {
-#if DEBUG
-            set.Server = "http://localhost:6600";
-#endif
+            set.Server = "http://47.113.219.65:6600";
 
             set.Save();
         }
@@ -653,7 +651,7 @@ internal class MyService : ServiceBase, IServiceProvider
         base.ShowMenu();
 
         var set = StarSetting;
-        if (!set.Server.IsNullOrEmpty()) Console.WriteLine("服务端：{0}", set.Server);
+       // if (!set.Server.IsNullOrEmpty()) Console.WriteLine("服务端：{0}", set.Server);
         Console.WriteLine();
     }
 

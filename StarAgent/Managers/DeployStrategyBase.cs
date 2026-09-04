@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.ComponentModel;
 using System.Diagnostics;
 using NewLife;
@@ -100,7 +100,45 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
     protected Boolean RetrieveExeFile(DeployContext context, String workDir)
     {
         var args = context.Arguments;
-        var runfile = FindExeFile(workDir, context.Name, ref args);
+        var service = context.Service;
+        
+        // 优先使用配置的 FileName 作为可执行文件名
+        var fileName = service?.FileName;
+        FileInfo? runfile = null;
+        
+        if (!fileName.IsNullOrEmpty())
+        {
+            // FileName 可能是完整路径
+            if (File.Exists(fileName))
+            {
+                runfile = new FileInfo(fileName);
+            }
+            // 或者是相对于工作目录的路径
+            else
+            {
+                var fullPath = Path.Combine(workDir, fileName);
+                if (File.Exists(fullPath))
+                {
+                    runfile = new FileInfo(fullPath);
+                }
+            }
+            
+            // 如果 FileName 是系统命令（如 node.exe），直接使用它
+            if (runfile == null && !fileName.Contains('/') && !fileName.Contains('\\'))
+            {
+                // 可能是 PATH 中的命令，直接使用
+                context.WriteLog("使用系统命令：{0}", fileName);
+                context.ExecuteFile = fileName;
+                // Arguments 保持不变
+                return true;
+            }
+        }
+        
+        // 如果没有配置 FileName 或找不到，则在工作目录中查找
+        if (runfile == null)
+        {
+            runfile = FindExeFile(workDir, context.Name, ref args);
+        }
         if (runfile == null)
         {
             context.WriteLog("无法找到可执行文件");
@@ -398,3 +436,5 @@ public abstract class DeployStrategyBase : IDeployStrategy, ITracerFeature
     }
     #endregion
 }
+
+
