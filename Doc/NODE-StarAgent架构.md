@@ -126,7 +126,7 @@ StarAgent 基于 NewLife.Agent 内置的 `AgentWebPanel` 框架，提供了轻�
 - **实现**：`StarAgent.WebPanel.StarPanel`（继承定制）
 - **API**：`StarAgent.WebPanel.StarApi`
 - **前端**：嵌入式 `index.html` SPA（单页应用）
-- **监听端口**：默认 5580（由 `agent.config` 中 `WebPort` 配置）
+- **监听端口**：默认 5500（TCP，程序启动时与 `LocalPort` 保持一致；本地 ApiServer 使用 UDP 5500）
 
 ### 6.2 面板功能
 
@@ -145,7 +145,7 @@ StarAgent 基于 NewLife.Agent 内置的 `AgentWebPanel` 框架，提供了轻�
 ### 6.3 架构说明
 
 ```
-浏览器 ──HTTP──► StarAgent Web 面板 (Port 5580)
+浏览器 ──HTTP──► StarAgent Web 面板 (TCP Port 5500)
                      │
           ┌──────────┴──────────┐
           ▼                     ▼

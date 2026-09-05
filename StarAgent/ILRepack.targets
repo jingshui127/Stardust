@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="ILRepack" AfterTargets="Build" Condition="'$(TargetFramework)'=='net461'">
+    <PropertyGroup>
+      <OutputPathFull>$(TargetDir)</OutputPathFull>
+      <ILRepackPath>$(NuGetPackageRoot)ilrepack\2.0.44\tools\ILRepack.exe</ILRepackPath>
+    </PropertyGroup>
+    <ItemGroup>
+      <InputAssemblies Include="$(OutputPathFull)StarAgent.exe" />
+      <InputAssemblies Include="$(OutputPathFull)NewLife.Agent.dll" />
+      <InputAssemblies Include="$(OutputPathFull)NewLife.Core.dll" />
+      <InputAssemblies Include="$(OutputPathFull)NewLife.Remoting.dll" />
+      <InputAssemblies Include="$(OutputPathFull)Stardust.dll" />
+      <InputAssemblies Include="$(OutputPathFull)System.Buffers.dll" />
+      <InputAssemblies Include="$(OutputPathFull)System.Memory.dll" />
+      <InputAssemblies Include="$(OutputPathFull)System.Numerics.Vectors.dll" />
+      <InputAssemblies Include="$(OutputPathFull)System.Runtime.CompilerServices.Unsafe.dll" />
+      <InputAssemblies Include="$(OutputPathFull)System.ValueTuple.dll" />
+      <InputAssemblies Include="$(OutputPathFull)System.Threading.Tasks.Extensions.dll" />
+      <InputPdbs Include="$(OutputPathFull)StarAgent.pdb" />
+      <InputPdbs Include="$(OutputPathFull)NewLife.Agent.pdb" />
+      <InputPdbs Include="$(OutputPathFull)NewLife.Core.pdb" />
+      <InputPdbs Include="$(OutputPathFull)NewLife.Remoting.pdb" />
+      <InputPdbs Include="$(OutputPathFull)Stardust.pdb" />
+      <InputPdbs Include="$(OutputPathFull)System.Buffers.pdb" />
+      <InputPdbs Include="$(OutputPathFull)System.Memory.pdb" />
+      <InputPdbs Include="$(OutputPathFull)System.Numerics.Vectors.pdb" />
+      <InputPdbs Include="$(OutputPathFull)System.Runtime.CompilerServices.Unsafe.pdb" />
+      <InputPdbs Include="$(OutputPathFull)System.ValueTuple.pdb" />
+      <InputPdbs Include="$(OutputPathFull)System.Threading.Tasks.Extensions.pdb" />
+    </ItemGroup>
+    <Exec Command="&quot;$(ILRepackPath)&quot; /out:&quot;$(OutputPathFull)StarAgent.merged.exe&quot; /target:exe /targetplatform:v4 /internalize /ndebug @(InputAssemblies->'&quot;%(FullPath)&quot;', ' ')" />
+    <Delete Files="@(InputAssemblies)" />
+    <Delete Files="@(InputPdbs)" />
+    <Delete Files="$(OutputPathFull)StarAgent.exe.config" />
+    <Delete Files="$(OutputPathFull)StarAgent.merged.exe.config" />
+    <Move SourceFiles="$(OutputPathFull)StarAgent.merged.exe" DestinationFiles="$(OutputPathFull)StarAgent.exe" />
+  </Target>
+</Project>
