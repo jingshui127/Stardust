@@ -4,11 +4,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>StarWebApi</AssemblyName>
     <RootNamespace>Stardust.Web</RootNamespace>
-    <AssemblyTitle>星尘管理平台 API</AssemblyTitle>
-    <Description>星尘分布式服务平台的解耦 WebApi 后端。复用 Stardust.Web 的区域控制器与业务服务，仅暴露 JSON 接口（EntityController 的 GetPage/GetFields/Insert/Update/Delete 及自定义 Action），剥离 Razor 视图、MCP 与静态站点，供 Stardust.Web.Vue 前端直接对接。</Description>
-    <Company>新生命开发团队</Company>
-    <Copyright>©2002-2026 NewLife</Copyright>
-    <VersionPrefix>3.7</VersionPrefix>
+    <AssemblyTitle>科控物联管理平台 API</AssemblyTitle>
+    <Description>科控物联分布式服务平台的解耦 WebApi 后端。复用管理平台的区域控制器与业务服务，仅暴露 JSON 接口，供前端直接对接。</Description>
+    <Company>科控物联</Company>
+    <Copyright>©2002-2026 TC</Copyright>
+    <VersionPrefix>3.10</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
     <FileVersion>$(Version)</FileVersion>

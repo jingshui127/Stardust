@@ -99,11 +99,6 @@ public class Startup
         {
             options.MultipartBodyLengthLimit = Int64.MaxValue;
         });
-        services.Configure<IISServerOptions>(options =>
-        {
-            options.MaxRequestBodySize = Int32.MaxValue;
-        });
-
         services.AddControllersWithViews();
 
         // 魔方 Swagger/Scalar 接口文档服务（OpenAPI 生成 + Basic Auth 保护）。
