@@ -42,18 +42,16 @@
     <Compile Include="..\Stardust.Server\Setting.cs" Link="Setting.cs" />
   </ItemGroup>
 
-  <!-- 纯 API 后端：通过 ProjectReference 引用本地 NewLife.Cube(API版)，不再链接 Stardust.Web 源码 -->
+  <!-- 纯 API 后端：使用官方 NewLife.Cube 包，不依赖本地 Cube 源码目录 -->
   <ItemGroup>
+    <PackageReference Include="NewLife.Cube" Version="6.15.2026.901" />
+    <PackageReference Include="NewLife.Cube.Swagger" Version="6.15.2026.901" />
     <PackageReference Include="NewLife.IP" Version="2.5.2026.804" />
-    <PackageReference Include="NewLife.Redis" Version="6.6.2026.801" />
-    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.9.2026.801" />
+    <PackageReference Include="NewLife.Redis" Version="6.6.2026.901" />
+    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.9.2026.901" />
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 本地 NewLife.Cube(API版)，复用其 EntityController/ApiResponse/AuthController 等纯 API 能力 -->
-    <ProjectReference Include="..\Cube\NewLife.Cube\NewLife.Cube.csproj" />
-    <!-- 魔方 Swagger/Scalar 依赖的 OpenAPI 文档生成（AddCubeSwagger） -->
-    <ProjectReference Include="..\Cube\NewLife.Cube.Swagger\NewLife.Cube.Swagger.csproj" />
     <ProjectReference Include="..\Stardust.Data\Stardust.Data.csproj" />
     <ProjectReference Include="..\Stardust.Extensions\Stardust.Extensions.csproj" />
     <ProjectReference Include="..\Stardust\Stardust.csproj" />
@@ -61,7 +59,7 @@
 
   <!-- Program.cs 为顶级语句，隐式 Program 类是 internal 的，集成测试工程需可见才能用 WebApplicationFactory<Program>。
        本工程现已与仓库统一用 newlife.snk 强名称签名，故 InternalsVisibleTo 必须带 Key=（friend 程序集 Stardust.WebApiTests 亦签名）。
-       公钥 blob 与 Cube/NewLife.Cube/NewLife.Cube.csproj 的 InternalsVisibleTo 一致。 -->
+       公钥 blob 与测试程序集的强名称签名一致。 -->
   <ItemGroup>
     <InternalsVisibleTo Include="Stardust.WebApiTests" Key="00240000048000001401000006020000002400005253413100080000010001000d41eb3bdab5c2150958b46c95632b7e4dcb0af77ed8637bd8543875bc2443d01273143bb46655a48a92efa76251adc63ccca6d0e9cef2e0ce93e32b5043bea179a6c710981be4a71703a03e10960643f7df091f499cf60183ef0e4e4e2eebf26e25cea0eebf87c8a6d7f8130c283fc3f747cb90623f0aaa619825e3fcd82f267a0f4bfd26c9f2a6b5a62a6b180b4f6d1d091fce6bd60a9aa9aa5b815b833b44e0f2e58b28a354cb20f52f31bb3b3a7c54f515426537e41f9c20c07e51f9cab8abc311daac19a41bd473a51c7386f014edf1863901a5c29addc89da2f2659c9c1e95affd6997396b9680e317c493e974a813186da277ff9c1d1b30e33cb5a2f6" />
   </ItemGroup>
