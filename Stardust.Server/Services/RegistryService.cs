@@ -164,7 +164,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         return app;
     }
 
-    /// <summary>可信接入判定。应用实例声明运行于同项目受管节点（NodeCode），或UUID/Macs命中该应用在线指纹时视为可信</summary>
+    /// <summary>可信接入判定。应用实例声明运行于同项目受管节点（NodeCode）、机器指纹命中平台受管节点，或UUID/Macs命中该应用在线指纹时视为可信</summary>
     /// <param name="app">已存在应用</param>
     /// <param name="request">登录请求</param>
     /// <returns>是否可信</returns>
@@ -179,6 +179,17 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
             if (node != null && node.Enable && (app.ProjectId <= 0 || node.ProjectId == app.ProjectId))
             {
                 XTrace.WriteLine("应用[{0}]可信接入：命中同项目节点[{1}]，IP={2}", app, node, inf.IP);
+                return true;
+            }
+        }
+
+        // 机器指纹门：UUID/Macs 命中平台受管节点（Node表），兼容未上报NodeCode的旧版客户端
+        if (!inf.UUID.IsNullOrEmpty() || !inf.Macs.IsNullOrEmpty())
+        {
+            var node = Node.FindByFingerprint(inf.UUID, inf.Macs);
+            if (node != null && node.Enable && (app.ProjectId <= 0 || node.ProjectId == app.ProjectId))
+            {
+                XTrace.WriteLine("应用[{0}]可信接入：命中受管节点[{1}]，IP={2}", app, node, inf.IP);
                 return true;
             }
         }

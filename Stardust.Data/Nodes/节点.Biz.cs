@@ -138,6 +138,44 @@ public partial class Node : Entity<Node>, IDeviceModel2, ILogProvider
         return Find(_.MACs.Contains(mac));
     }
 
+    /// <summary>根据机器指纹查找节点。UUID 相同，或 MACs 与上报列表存在交集，即视为同一台机器</summary>
+    /// <param name="uuid">机器标识。客户端上报的机器UUID</param>
+    /// <param name="macs">网卡地址列表。客户端上报的MAC地址，逗号分隔</param>
+    /// <returns>实体对象</returns>
+    public static Node FindByFingerprint(String uuid, String macs)
+    {
+        if (uuid.IsNullOrEmpty() && macs.IsNullOrEmpty()) return null;
+
+        var ms = macs.IsNullOrEmpty() ? Array.Empty<String>() : macs.Split(',', StringSplitOptions.RemoveEmptyEntries);
+
+        // 实体缓存
+        if (Meta.Session.Count < 1000)
+        {
+            foreach (var node in Meta.Cache.Entities)
+            {
+                if (!uuid.IsNullOrEmpty() && node.Uuid.EqualIgnoreCase(uuid)) return node;
+
+                if (ms.Length > 0 && !node.MACs.IsNullOrEmpty() && node.MACs.Split(',').Any(e => ms.Any(y => e.EqualIgnoreCase(y)))) return node;
+            }
+
+            return null;
+        }
+
+        if (!uuid.IsNullOrEmpty())
+        {
+            var node = Find(_.Uuid == uuid);
+            if (node != null) return node;
+        }
+
+        foreach (var mac in ms)
+        {
+            var node = FindByMac(mac);
+            if (node != null) return node;
+        }
+
+        return null;
+    }
+
     /// <summary>根据名称查找</summary>
     /// <param name="code">名称</param>
     /// <param name="cache">是否走缓存</param>
