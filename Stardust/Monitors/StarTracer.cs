@@ -25,8 +25,10 @@ public class StarTracer : DefaultTracer
     /// <summary>应用名</summary>
     public String? AppName { get; set; }
 
+    private String? _clientId;
     /// <summary>实例。应用可能多实例部署，ip@proccessid</summary>
-    public String? ClientId { get; set; }
+    /// <remarks>首次联网之前IP可能为空，此时为“@进程号”；获得IP后自动补全为完整标识</remarks>
+    public String? ClientId { get => _clientId ?? Runtime.ClientId; set => _clientId = value; }
 
     /// <summary>最大失败数。超过该数时，新的数据将被抛弃，默认2 * 24 * 60</summary>
     public Int32 MaxFails { get; set; } = 2 * 24 * 60;
@@ -46,6 +48,15 @@ public class StarTracer : DefaultTracer
     /// <summary>性能收集。收集应用性能信息，数量较大的客户端可以不必收集应用性能信息</summary>
     public Boolean EnableMeter { get; set; } = true;
 
+    /// <summary>采集 OpenTelemetry 埋点。把进程内第三方组件的活动转成埋点上报，默认true</summary>
+    public Boolean EnableOpenTelemetry { get; set; } = true;
+
+#if NET6_0_OR_GREATER
+    /// <summary>OpenTelemetry 采集器。为空时按 <see cref="EnableOpenTelemetry"/> 自动创建</summary>
+    /// <remarks>可预先配置源名白名单或黑名单，例如只采集 Redis 与 Npgsql</remarks>
+    public OpenTelemetryCollector? OpenTelemetry { get; set; }
+#endif
+
     private readonly String? _version;
     private readonly Process _process = Process.GetCurrentProcess();
     private readonly ConcurrentQueue<TraceModel> _fails = new();
@@ -62,6 +73,7 @@ public class StarTracer : DefaultTracer
         Period = set.TracerPeriod;
         MaxSamples = set.MaxSamples;
         MaxErrors = set.MaxErrors;
+        EnableOpenTelemetry = set.EnableOpenTelemetry;
 
         if (set.Debug) Log = XTrace.Log;
 
@@ -77,8 +89,6 @@ public class StarTracer : DefaultTracer
                 AppName = asm.Title;
                 _version = asm.FileVersion;
             }
-
-            ClientId = $"{NetHelper.MyIP()}@{Process.GetCurrentProcess().Id}";
         }
         catch { }
     }
@@ -101,6 +111,44 @@ public class StarTracer : DefaultTracer
     }
     #endregion
 
+    #region OpenTelemetry
+#if NET6_0_OR_GREATER
+    /// <summary>挂载 OpenTelemetry 采集器。把进程内第三方组件的活动转成埋点，与自研埋点统一上报</summary>
+    /// <returns>采集器实例，未启用时返回空。低版本目标框架不支持 OpenTelemetry，方法不提供</returns>
+    public OpenTelemetryCollector? AttachOpenTelemetry()
+    {
+        if (!EnableOpenTelemetry) return null;
+
+        var collector = OpenTelemetry;
+        if (collector == null)
+        {
+            collector = new OpenTelemetryCollector { Tracer = this };
+            OpenTelemetry = collector;
+        }
+        collector.Attach();
+
+        return collector;
+    }
+#endif
+    #endregion
+
+    #region 销毁
+    /// <summary>销毁</summary>
+    /// <param name="disposing"></param>
+    protected override void Dispose(Boolean disposing)
+    {
+        base.Dispose(disposing);
+
+        if (disposing)
+        {
+#if NET6_0_OR_GREATER
+            OpenTelemetry?.Dispose();
+            OpenTelemetry = null;
+#endif
+        }
+    }
+    #endregion
+
     #region 核心业务
     private Int32 _inited;
     private readonly Object _initLock = new();
@@ -118,7 +166,7 @@ public class StarTracer : DefaultTracer
             if (client == null) throw new ArgumentNullException(nameof(Client));
 
             var server = client is ClientBase cbase ? cbase.Server : (client + "");
-            WriteLog("星尘监控中心 Server={0} AppId={1} ClientId={2}", server, AppId, ClientId);
+            WriteLog("Stardust monitoring center Server={0} AppId={1} ClientId={2}", server, AppId, ClientId);
 
             _inited = 1;
         }
@@ -215,14 +263,14 @@ public class StarTracer : DefaultTracer
         {
             var source = (client as ApiHttpClient)?.Source;
             var ex2 = ex is AggregateException aex ? aex.InnerException : ex;
-            if (ex2 is TaskCanceledException tce)
-                Log?.Debug("监控中心[{0}]出错 {1} TaskId={2}", source, ex2.GetType().Name, tce.Task?.Id);
-            else if (ex2 is HttpRequestException hre)
-                Log?.Debug("监控中心[{0}]出错 {1} {2}", source, ex2.GetType().Name, hre.Message);
-            else if (ex2 is SocketException se)
-                Log?.Debug("监控中心[{0}]出错 {1} SocketErrorCode={2}", source, ex2.GetType().Name, se.SocketErrorCode);
-            else
-                Log?.Debug("监控中心[{0}]出错 {1}", source, ex);
+            var detail = ex2 switch
+            {
+                TaskCanceledException tce => $"TaskId={tce.Task?.Id}",
+                HttpRequestException hre => hre.Message,
+                SocketException se => $"SocketErrorCode={se.SocketErrorCode}",
+                _ => ex + "",
+            };
+            Log?.Debug("Monitoring center [{0}] error: {1}: {2}", source, ex2.GetType().Name, detail);
 
             //if (ex2 is not HttpRequestException)
             //    Log?.Error(ex + "");
@@ -272,7 +320,7 @@ public class StarTracer : DefaultTracer
             }
             catch (Exception ex)
             {
-                Log?.Info("二次上报失败，放弃该批次采样数据，{0}", model.Builders?.FirstOrDefault()?.StartTime.ToDateTime());
+                Log?.Info("Failed to report the sample data twice; discarding this batch: {0}", model.Builders?.FirstOrDefault()?.StartTime.ToDateTime());
                 //if (Log != null && Log.Level <= LogLevel.Debug) Log?.Error(ex + "");
                 Log?.Debug("{0}", ex);
 
@@ -290,6 +338,11 @@ public class StarTracer : DefaultTracer
     {
         Instance = this;
         ApiHelper.Tracer = this;
+
+#if NET6_0_OR_GREATER
+        // 采集第三方组件的 OpenTelemetry 埋点，与自研埋点统一上报星尘
+        AttachOpenTelemetry();
+#endif
 
 #if NET5_0_OR_GREATER
         // 订阅Http事件
@@ -345,7 +398,7 @@ public class StarTracer : DefaultTracer
             var inf = client.GetInfo();
             server = inf?.Server;
 
-            if (!server.IsNullOrEmpty()) XTrace.WriteLine("星尘探测：{0}", server);
+            if (!server.IsNullOrEmpty()) XTrace.WriteLine("Stardust probe: {0}", server);
         }
         if (server.IsNullOrEmpty()) return null;
 

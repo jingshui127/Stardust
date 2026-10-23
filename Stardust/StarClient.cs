@@ -49,7 +49,13 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
 
     /// <summary>使用客户端设置来初始化</summary>
     /// <param name="setting"></param>
-    public StarClient(IClientSetting setting) : base(setting) => SetDefault();
+    public StarClient(IClientSetting setting) : base(setting)
+    {
+        SetDefault();
+
+        // 配置了语言时固定本进程的界面与日志语言
+        if (setting is StarSetting star) StarLocalization.UseLanguage(star.Language);
+    }
 
     /// <summary>实例化</summary>
     /// <param name="urls"></param>
@@ -115,7 +121,7 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
             UserName = Environment.UserName,
             IP = AgentInfo.GetIps(),
             Gateway = AgentInfo.GetGateway(),
-            Dns = AgentInfo.GetDns(),
+            Dns = AgentInfo.GetDnsList(),
 
             ProcessorCount = Environment.ProcessorCount,
             Memory = mi.Memory,
@@ -192,9 +198,11 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
 #if NET5_0_OR_GREATER
         if (OperatingSystem.IsWindows()) FillOnWindows(di);
         if (OperatingSystem.IsLinux()) FillOnLinux(di);
+        if (OperatingSystem.IsMacOS()) FillOnOSX(di);
 #else
         if (Runtime.Windows) FillOnWindows(di);
         if (Runtime.Linux) FillOnLinux(di);
+        if (Runtime.OSX) FillOnOSX(di);
 #endif
 
         return di;
@@ -315,7 +323,7 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
 
         request.IP = AgentInfo.GetIps();
         request.Gateway = AgentInfo.GetGateway();
-        request.Dns = AgentInfo.GetDns();
+        request.Dns = AgentInfo.GetDnsList();
         request.DriveInfo = drives.Join(",", e => $"{e.Name}[{e.DriveFormat}]={e.AvailableFreeSpace.ToGMK()}/{e.TotalSize.ToGMK()}");
         request.Macs = (String?)NetHelper.GetMacs().Select(e => e.ToHex("-")).OrderBy(e => e).Join(",");
         request.ProcessCount = ps.Length;
@@ -375,6 +383,7 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
         // 平台特定采集（Load1、DiskIOPS、GPU）
         if (Runtime.Windows) FillPingOnWindows(request);
         if (Runtime.Linux) FillPingOnLinux(request);
+        if (Runtime.OSX) FillPingOnOSX(request);
 
         // 最后设置时间，避免因为代码执行原因导致误差过大
         request.Uptime = (Int32)(Runtime.TickCount64 / 1000);
@@ -419,7 +428,7 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
         }
         catch (Exception ex)
         {
-            XTrace.WriteLine($"后台网络质量测量失败：{ex.Message}");
+            XTrace.WriteLine(L.TLog("Background network quality measurement failed: {0}", ex.Message));
         }
         finally
         {

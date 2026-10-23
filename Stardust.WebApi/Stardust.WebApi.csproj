@@ -4,11 +4,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>StarWebApi</AssemblyName>
     <RootNamespace>Stardust.Web</RootNamespace>
-    <AssemblyTitle>科控物联管理平台 API</AssemblyTitle>
-    <Description>科控物联分布式服务平台的解耦 WebApi 后端。复用管理平台的区域控制器与业务服务，仅暴露 JSON 接口，供前端直接对接。</Description>
-    <Company>科控物联</Company>
-    <Copyright>©2002-2026 TC</Copyright>
-    <VersionPrefix>3.10</VersionPrefix>
+    <AssemblyTitle>Stardust management API</AssemblyTitle>
+    <Description>Decoupled WebApi backend for the Stardust distributed service platform. Reuses the area controllers and business services of Stardust.Web while exposing only JSON endpoints (GetPage/GetFields/Insert/Update/Delete and custom actions of EntityController), without Razor views, MCP, or static sites, for direct use by the Stardust.Web.Vue frontend.</Description>
+    <Company>新生命开发团队</Company>
+    <Copyright>©2002-2026 NewLife</Copyright>
+    <VersionPrefix>3.7</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
     <FileVersion>$(Version)</FileVersion>
@@ -40,15 +40,18 @@
     <Compile Include="..\Stardust.Server\Services\DnsProviderFactory.cs" Link="Services\DnsProviderFactory.cs" />
     <Compile Include="..\Stardust.Server\Services\DnsService.cs" Link="Services\DnsService.cs" />
     <Compile Include="..\Stardust.Server\Setting.cs" Link="Setting.cs" />
+    <Compile Include="..\Stardust.Server\Localization\StardustLocalization.cs" Link="Localization\StardustLocalization.cs" />
   </ItemGroup>
 
-  <!-- 纯 API 后端：使用官方 NewLife.Cube 包，不依赖本地 Cube 源码目录 -->
+  <!-- 纯 API 后端：引用 NuGet 版 NewLife.Cube(API版)，不再链接 Stardust.Web 源码 -->
   <ItemGroup>
-    <PackageReference Include="NewLife.Cube" Version="6.15.2026.1002-beta1649" />
-    <PackageReference Include="NewLife.Cube.Swagger" Version="6.15.2026.1002-beta1649" />
-    <PackageReference Include="NewLife.IP" Version="2.5.2026.804" />
-    <PackageReference Include="NewLife.Redis" Version="6.6.2026.901" />
-    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.9.2026.901" />
+    <PackageReference Include="NewLife.IP" Version="2.5.2026.1019-beta1510" />
+    <PackageReference Include="NewLife.Redis" Version="6.6.2026.1019-beta1511" />
+    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.9.2026.1019-beta1013" />
+    <!-- 魔方 WebAPI 核心库，复用其 EntityController/ApiResponse/AuthController 等纯 API 能力 -->
+    <PackageReference Include="NewLife.Cube" Version="6.15.2026.1018-beta1727" />
+    <!-- 魔方 Swagger/Scalar 依赖的 OpenAPI 文档生成（AddCubeSwagger） -->
+    <PackageReference Include="NewLife.Cube.Swagger" Version="6.15.2026.1018-beta1727" />
   </ItemGroup>
 
   <ItemGroup>
@@ -59,9 +62,14 @@
 
   <!-- Program.cs 为顶级语句，隐式 Program 类是 internal 的，集成测试工程需可见才能用 WebApplicationFactory<Program>。
        本工程现已与仓库统一用 newlife.snk 强名称签名，故 InternalsVisibleTo 必须带 Key=（friend 程序集 Stardust.WebApiTests 亦签名）。
-       公钥 blob 与测试程序集的强名称签名一致。 -->
+       公钥 blob 与 Cube/NewLife.Cube/NewLife.Cube.csproj 的 InternalsVisibleTo 一致。 -->
   <ItemGroup>
     <InternalsVisibleTo Include="Stardust.WebApiTests" Key="00240000048000001401000006020000002400005253413100080000010001000d41eb3bdab5c2150958b46c95632b7e4dcb0af77ed8637bd8543875bc2443d01273143bb46655a48a92efa76251adc63ccca6d0e9cef2e0ce93e32b5043bea179a6c710981be4a71703a03e10960643f7df091f499cf60183ef0e4e4e2eebf26e25cea0eebf87c8a6d7f8130c283fc3f747cb90623f0aaa619825e3fcd82f267a0f4bfd26c9f2a6b5a62a6b180b4f6d1d091fce6bd60a9aa9aa5b815b833b44e0f2e58b28a354cb20f52f31bb3b3a7c54f515426537e41f9c20c07e51f9cab8abc311daac19a41bd473a51c7386f014edf1863901a5c29addc89da2f2659c9c1e95affd6997396b9680e317c493e974a813186da277ff9c1d1b30e33cb5a2f6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
   </ItemGroup>
 
 </Project>

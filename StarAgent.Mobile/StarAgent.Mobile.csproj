@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyTitle>Stardust mobile agent core</AssemblyTitle>
+    <Description>Shared core of the Stardust agent for mobile platforms. Provides platform-independent login, heartbeat, device information collection, and command dispatch for Android and iOS hosts.</Description>
+    <Company>新生命开发团队</Company>
+    <Copyright>©2002-2026 NewLife</Copyright>
+    <OutputPath>..\Bin</OutputPath>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <SignAssembly>True</SignAssembly>
+    <AssemblyOriginatorKeyFile>..\Doc\newlife.snk</AssemblyOriginatorKeyFile>
+    <IsPackable>False</IsPackable>
+    <NoWarn>1701;1702;NU5104;NETSDK1138;CS7035;CS8600;CS8602;CS8603;CS8604;CS8618;CS8619;CS8625</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Stardust\Stardust.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
+  </ItemGroup>
+
+</Project>

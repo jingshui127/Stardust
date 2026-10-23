@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -87,14 +86,14 @@ internal sealed class AgentExpansionService
         var server = StarSetting.Current.Server;
         if (server.IsNullOrEmpty())
         {
-            Log.Info("未配置StarServer，跳过自动安装");
+            Log.Info("StarServer is not configured; skipping automatic installation");
             return;
         }
 
         var local = AgentInfo.GetLocal(false);
         local.Server = server;
 
-        var targets = GetTargets(set).ToList();
+        var targets = GetTargets(set, Log).ToList();
         if (targets.Count == 0) return;
 
         var localIps = GetLocalIpSet();
@@ -147,14 +146,14 @@ internal sealed class AgentExpansionService
             var info = await client.InvokeAsync<AgentInfo>("Info", local).ConfigureAwait(false);
             if (info != null)
             {
-                Log.Info("节点 {0} 已存在StarAgent({1})", address, info.Version);
+                Log.Info("Node {0} already has StarAgent ({1})", address, info.Version);
                 return true;
             }
         }
         catch (TimeoutException) { }
         catch (Exception ex)
         {
-            Log.Debug("{0} 探测失败：{1}", address, ex.Message);
+            Log.Debug("{0} probe failed: {1}", address, ex.Message);
         }
 
         return false;
@@ -182,7 +181,7 @@ internal sealed class AgentExpansionService
             {
                 if (expectedKey.IsNullOrEmpty())
                 {
-                    Log.Info("节点 {0} 未配置SSH指纹，跳过校验", address);
+                    Log.Info("Node {0} has no SSH fingerprint configured; skipping verification", address);
                     args.CanTrust = true;
                     return;
                 }
@@ -190,7 +189,7 @@ internal sealed class AgentExpansionService
                 var actual = NormalizeHostKey(BitConverter.ToString(args.FingerPrint));
                 args.CanTrust = actual.EqualIgnoreCase(expectedKey);
                 if (!args.CanTrust)
-                    Log.Info("节点 {0} SSH指纹不匹配，期望 {1} 实际 {2}", address, expectedKey, actual);
+                    Log.Info("SSH fingerprint mismatch for node {0}; expected {1}, actual {2}", address, expectedKey, actual);
             };
             client.Connect();
             if (!client.IsConnected) return false;
@@ -205,16 +204,16 @@ internal sealed class AgentExpansionService
             var command = BuildInstallCommand(remoteFile, targetPath, server);
             var result = client.RunCommand(command);
             if (result.ExitStatus != 0)
-                Log.Info("节点 {0} 执行安装命令返回：{1}", address, result.Error);
+                Log.Info("Node {0} returned from the installation command: {1}", address, result.Error);
             else
-                Log.Info("节点 {0} 已发送安装命令", address);
+                Log.Info("Installation command sent to node {0}", address);
 
             client.Disconnect();
             return true;
         }
         catch (Exception ex)
         {
-            Log.Debug("{0} SSH失败：{1}", address, ex.Message);
+            Log.Debug("{0} SSH failed: {1}", address, ex.Message);
             return false;
         }
     }
@@ -230,11 +229,11 @@ internal sealed class AgentExpansionService
         if (url.IsNullOrEmpty()) return false;
         if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && set.PackageSha512.IsNullOrEmpty())
         {
-            Log.Info("节点 {0} Telnet下载需HTTPS或配置PackageSha512", address);
+            Log.Info("Telnet download for node {0} requires HTTPS or a configured PackageSha512.", address);
             return false;
         }
         if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            Log.Info("节点 {0} Telnet使用HTTP下载存在风险，请评估网络安全", address);
+            Log.Info("Telnet download over HTTP for node {0} is risky; assess network security.", address);
 
         try
         {
@@ -246,12 +245,12 @@ internal sealed class AgentExpansionService
             await session.WriteLineAsync(command, cancellationToken).ConfigureAwait(false);
             await session.ReadAsync(set.Timeout, cancellationToken).ConfigureAwait(false);
 
-            Log.Info("节点 {0} 已发送Telnet安装命令", address);
+            Log.Info("Telnet installation command sent to node {0}", address);
             return true;
         }
         catch (Exception ex)
         {
-            Log.Debug("{0} Telnet失败：{1}", address, ex.Message);
+            Log.Debug("{0} Telnet failed: {1}", address, ex.Message);
             return false;
         }
     }
@@ -262,11 +261,11 @@ internal sealed class AgentExpansionService
         if (url.IsNullOrEmpty()) return null;
         if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) && set.PackageSha512.IsNullOrEmpty())
         {
-            Log.Info("安装包下载需HTTPS或配置PackageSha512");
+            Log.Info("Package download requires HTTPS or a configured PackageSha512.");
             return null;
         }
         if (!url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-            Log.Info("安装包使用HTTP下载存在风险，请评估网络安全");
+            Log.Info("Downloading the package over HTTP is risky; assess network security.");
 
         await _packageLock.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
@@ -286,7 +285,7 @@ internal sealed class AgentExpansionService
                 var actual = NetRuntime.GetSHA512(file);
                 if (!actual.EqualIgnoreCase(expected))
                 {
-                    Log.Info("安装包哈希校验失败，期望 {0} 实际 {1}", expected, actual);
+                    Log.Info("Package hash verification failed; expected {0}, actual {1}", expected, actual);
                     File.Delete(file);
                     return null;
                 }
@@ -428,197 +427,12 @@ internal sealed class AgentExpansionService
         return ips;
     }
 
-    private static IEnumerable<IPAddress> GetTargets(AgentExpansionSetting set)
+    private static IEnumerable<IPAddress> GetTargets(AgentExpansionSetting set, ILog? log)
     {
-        var ranges = ParseNetworks(set.Networks);
-        if (ranges.Count == 0) ranges = GetLocalRanges();
+        var ranges = LanScan.ParseNetworks(set.Networks, log);
+        if (ranges.Count == 0) ranges = LanScan.GetLocalRanges();
 
-        var maxHosts = set.MaxHosts;
-        var count = 0;
-        foreach (var range in ranges)
-        {
-            foreach (var address in range.GetAddresses())
-            {
-                yield return address;
-                count++;
-                if (maxHosts > 0 && count >= maxHosts) yield break;
-            }
-        }
-    }
-
-    private static List<NetworkRange> ParseNetworks(String? text)
-    {
-        var list = new List<NetworkRange>();
-        if (text.IsNullOrEmpty()) return list;
-
-        var parts = text.Split([',', ';', '\r', '\n', '\t', ' '], StringSplitOptions.RemoveEmptyEntries);
-        foreach (var part in parts)
-        {
-            if (TryParseCidr(part, out var range) ||
-                TryParseWildcard(part, out range) ||
-                TryParseSingle(part, out range))
-                list.Add(range);
-        }
-
-        return list;
-    }
-
-    private static List<NetworkRange> GetLocalRanges()
-    {
-        var list = new List<NetworkRange>();
-
-        foreach (var nic in NetworkInterface.GetAllNetworkInterfaces())
-        {
-            if (nic.OperationalStatus != OperationalStatus.Up) continue;
-            if (nic.NetworkInterfaceType is NetworkInterfaceType.Loopback or NetworkInterfaceType.Tunnel) continue;
-
-            var props = nic.GetIPProperties();
-            if (props == null) continue;
-
-            foreach (var unicast in props.UnicastAddresses)
-            {
-                if (unicast.Address.AddressFamily != AddressFamily.InterNetwork) continue;
-                if (IPAddress.IsLoopback(unicast.Address)) continue;
-                if (unicast.IPv4Mask == null) continue;
-                //if (unicast.PrefixOrigin == PrefixOrigin.WellKnown) continue;
-                if (unicast.Address.GetAddressBytes()[0] == 169) continue;
-
-                var prefix = GetPrefixLength(unicast.IPv4Mask);
-                if (prefix <= 0) continue;
-
-                list.Add(NetworkRange.FromCidr(unicast.Address, prefix));
-            }
-        }
-
-        return list;
-    }
-
-    private static Int32 GetPrefixLength(IPAddress mask)
-    {
-        var bytes = mask.GetAddressBytes();
-        var count = 0;
-        foreach (var item in bytes)
-        {
-            var value = item;
-            for (var i = 0; i < 8; i++)
-            {
-                if ((value & 0x80) == 0x80) count++;
-                value <<= 1;
-            }
-        }
-
-        return count;
-    }
-
-    private static Boolean TryParseSingle(String text, out NetworkRange range)
-    {
-        range = default;
-        if (!IPAddress.TryParse(text, out var address)) return false;
-
-        range = NetworkRange.FromSingle(address);
-        return true;
-    }
-
-    private static Boolean TryParseCidr(String text, out NetworkRange range)
-    {
-        range = default;
-        var p = text.IndexOf('/');
-        if (p <= 0) return false;
-
-        if (!IPAddress.TryParse(text[..p], out var address)) return false;
-        if (!Int32.TryParse(text[(p + 1)..], out var prefix)) return false;
-        if (prefix < 0 || prefix > 32) return false;
-
-        range = NetworkRange.FromCidr(address, prefix);
-        return true;
-    }
-
-    private static Boolean TryParseWildcard(String text, out NetworkRange range)
-    {
-        range = default;
-        if (!text.Contains('*')) return false;
-
-        var parts = text.Split('.');
-        if (parts.Length != 4) return false;
-
-        var startBytes = new Byte[4];
-        var endBytes = new Byte[4];
-
-        for (var i = 0; i < 4; i++)
-        {
-            if (parts[i] == "*")
-            {
-                startBytes[i] = 0;
-                endBytes[i] = 255;
-            }
-            else if (Byte.TryParse(parts[i], out var value))
-            {
-                startBytes[i] = value;
-                endBytes[i] = value;
-            }
-            else
-            {
-                return false;
-            }
-        }
-
-        range = new NetworkRange(new IPAddress(startBytes), new IPAddress(endBytes));
-        return true;
-    }
-}
-
-internal readonly struct NetworkRange
-{
-    public NetworkRange(IPAddress start, IPAddress end)
-    {
-        Start = start;
-        End = end;
-    }
-
-    public IPAddress Start { get; }
-    public IPAddress End { get; }
-
-    public IEnumerable<IPAddress> GetAddresses()
-    {
-        var start = ToUInt32(Start);
-        var end = ToUInt32(End);
-        if (end < start) yield break;
-
-        for (var i = start; i <= end; i++)
-        {
-            yield return ToIPAddress(i);
-
-            if (i == UInt32.MaxValue) break;
-        }
-    }
-
-    public static NetworkRange FromSingle(IPAddress address) => new(address, address);
-
-    public static NetworkRange FromCidr(IPAddress address, Int32 prefix)
-    {
-        var ip = ToUInt32(address);
-        var mask = prefix == 0 ? 0U : UInt32.MaxValue << (32 - prefix);
-        var network = ip & mask;
-        var broadcast = network | ~mask;
-
-        var start = prefix >= 31 ? network : network + 1;
-        var end = prefix >= 31 ? broadcast : broadcast - 1;
-
-        return new NetworkRange(ToIPAddress(start), ToIPAddress(end));
-    }
-
-    private static UInt32 ToUInt32(IPAddress address)
-    {
-        var bytes = address.GetAddressBytes();
-        if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
-        return BitConverter.ToUInt32(bytes, 0);
-    }
-
-    private static IPAddress ToIPAddress(UInt32 value)
-    {
-        var bytes = BitConverter.GetBytes(value);
-        if (BitConverter.IsLittleEndian) Array.Reverse(bytes);
-        return new IPAddress(bytes);
+        return LanScan.GetTargets(LanScan.Distinct(ranges), set.MaxHosts, log);
     }
 }
 

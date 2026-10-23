@@ -18,6 +18,7 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
 
     private TimerX _timer;
     private ICache _cache;
+    private ITraceStatService _statService;
 
     /// <summary>启动服务，初始化定时器</summary>
     /// <param name="cancellationToken">取消令牌</param>
@@ -45,6 +46,7 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
     private void DoAlarm(Object state)
     {
         _cache ??= serviceProvider.GetService<ICacheProvider>()?.Cache;
+        _statService ??= serviceProvider.GetService<ITraceStatService>();
 
         // 应用告警
         var list = AppTracer.FindAllWithCache();
@@ -90,28 +92,41 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
 
         using var span = tracer?.NewSpan($"alarm:{nameof(AppTracer)}");
 
-        // 最近一段时间的5分钟级数据
+        // 最近一段时间的5分钟级数据。内存实时值优先（不等待落盘），数据库兜底
         var time = DateTime.Now;
         var minute = time.Date.AddHours(time.Hour).AddMinutes(time.Minute / 5 * 5);
         span?.AppendTag(new { time, minute });
 
-        var st = AppMinuteStat.FindByAppIdAndTime(appId, minute);
-        if (st != null)
+        // 依次检查当前桶与上一桶，回溯上一桶用于兜底重启或恢复期间晚到落库的数据
+        for (var i = 0; i <= 1; i++)
         {
+            var bucket = minute.AddMinutes(-5 * i);
+            var st = _statService?.GetLiveAppMinute(appId, bucket) ?? AppMinuteStat.FindByAppIdAndTime(appId, bucket);
+            if (st == null) continue;
+
+            // 内存实体尚未经过保存校验，错误率需要现场计算
+            var errorRate = CalcErrorRate(st.Total, st.Errors);
+
             // 判断告警
             if (app.AlarmThreshold > 0 && st.Errors >= app.AlarmThreshold ||
-                app.AlarmErrorRate > 0 && st.ErrorRate >= app.AlarmErrorRate)
+                app.AlarmErrorRate > 0 && errorRate >= app.AlarmErrorRate)
             {
-                span?.AppendTag(new { st.Errors, st.ErrorRate });
+                span?.AppendTag(new { bucket, st.Errors, errorRate });
 
                 // 一定时间内不要重复报错，除非错误翻倍
                 var error2 = _cache.Get<Int32>("alarm:AppTracer:" + appId);
                 if (error2 == 0 || st.Errors > error2 * 2)
                 {
                     _cache.Set("alarm:AppTracer:" + appId, st.Errors, 5 * 60);
+                    st.ErrorRate = errorRate;
 
                     var msg = GetMarkdown(app, st, true);
                     RobotHelper.SendAlarmWithRecord(app.Category ?? app.ProjectName, webhook, "应用告警", msg, "应用告警", app.Name);
+
+                    // 触发紧急落盘，保证告警依据及时入库
+                    _statService?.TriggerFlush();
+
+                    break;
                 }
             }
         }
@@ -130,13 +145,15 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
         sb.AppendLine($">**总数：**<font color=\"red\">{st.Errors}</font>");
         sb.AppendLine($">**错误率：**<font color=\"red\">{st.ErrorRate:p2}</font>");
 
-        var url = setting.WebUrl;
-        var appUrl = "";
+        // 多地址配置（英文分号分隔）时，只取第一个（主）地址统一构造跳转链接
+        var primary = GetWebUrl();
         var traceUrl = "";
-        if (!url.IsNullOrEmpty())
+        var sampleUrl = "";
+        if (!primary.IsNullOrEmpty())
         {
-            appUrl = url.EnsureEnd("/") + "Monitors/appMinuteStat?appId=" + st.AppId + "&minError=1";
-            traceUrl = url.EnsureEnd("/") + "Monitors/traceMinuteStat?appId=" + st.AppId + "&minError=1";
+            traceUrl = primary + "Monitors/traceMinuteStat?appId=" + st.AppId + "&minError=1";
+            // 采样详情页面，用于按追踪标识查看单次调用的错误详情
+            sampleUrl = primary + "Monitors/sampleData";
         }
 
         // 找找具体接口错误
@@ -165,22 +182,22 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
                                 if (node != null) nodes[traceData.ClientId] = node;
                             }
                         }
-                        if (nodes.Count > 0) sb.AppendLine($">**节点：**<font color=\"greed\">{nodes.Join(",", e => e.Value.Name)}</font>");
+                        if (nodes.Count > 0) sb.AppendLine($">**节点：**<font color=\"greed\">{nodes.Select(e => e.Value.Name).Distinct().Join(",")}</font>");
 
                         var sms = SampleData.FindAllByDataIds(ds.Select(e => e.Id).ToArray(), item.StatTime).Where(e => !e.Error.IsNullOrEmpty()).ToList();
                         if (sms.Count > 0)
                         {
-                            var msg = sms[0].Error?.Trim();
-                            if (!msg.IsNullOrEmpty())
-                            {
-                                // 错误内容取第一行，详情看更多
-                                var p = msg.IndexOfAny(new[] { '\r', '\n' });
-                                if (p > 0) msg = msg[..p];
+                            // 输出错误采样摘要，带上位置、实例与追踪链接
+                            AppendErrorSamples(sb, sms, sampleUrl, 1);
 
-                                sb.AppendLine($">内容：{msg}");
+                            names.Add(item.Name);
+                        }
+                        else
+                        {
+                            // 没有采样数据时，说明原因，避免告警只有一句错误而看不出为何没有详情
+                            sb.AppendLine($">内容：无错误采样数据，请检查应用采样周期与最大错误采样数设置");
 
-                                names.Add(item.Name);
-                            }
+                            names.Add(item.Name);
                         }
                     }
                 }
@@ -191,10 +208,7 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
         if (str.Length > 1600) str = str[..1600];
 
         // 构造网址
-        if (!appUrl.IsNullOrEmpty())
-        {
-            str += Environment.NewLine + $"[更多信息]({appUrl})";
-        }
+        str += BuildMoreInfo($"Monitors/appMinuteStat?appId={st.AppId}&minError=1");
 
         return str;
     }
@@ -219,12 +233,24 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
 
             using var span = tracer?.NewSpan($"alarm:{nameof(TraceItem)}", new { appId = app.ID, time, minute });
 
-            var list = TraceMinuteStat.Search(app.ID, minute, tis.Select(e => e.Id).ToArray());
-            foreach (var st in list)
+            var itemIds = tis.Select(e => e.Id).ToArray();
+            var fired = new List<Int32>();
+
+            // 依次检查当前桶与上一桶，回溯上一桶用于兜底重启或恢复期间晚到落库的数据
+            for (var i = 0; i <= 1; i++)
             {
-                var ti = tis.FirstOrDefault(e => e.Id == st.ItemId);
-                if (ti != null)
+                var bucket = minute.AddMinutes(-5 * i);
+
+                // 数据库行兜底，内存实时值优先覆盖（不再等待落盘）
+                var list = TraceMinuteStat.Search(app.ID, bucket, itemIds);
+                var dict = new Dictionary<Int32, TraceMinuteStat>();
+                foreach (var st in list) dict[st.ItemId] = st;
+
+                foreach (var ti in tis)
                 {
+                    // 同一个跟踪项只报一次，不跨桶重复
+                    if (fired.Contains(ti.Id)) continue;
+
                     var max = ti.AlarmThreshold;
                     var rate = ti.AlarmErrorRate;
                     if (max <= 0 && rate <= 0)
@@ -232,12 +258,21 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
                         max = app.ItemAlarmThreshold;
                         rate = app.ItemAlarmErrorRate;
                     }
+                    if (max <= 0 && rate <= 0) continue;
+
+                    // 内存优先：未落盘时数据库可能还没有该行
+                    var live = _statService?.GetLiveMinute(app.ID, ti.Id, bucket);
+                    var st = SelectLatest(live, dict.TryGetValue(ti.Id, out var db) ? db : null);
+                    if (st == null) continue;
+
+                    // 内存实体尚未经过保存校验，错误率需要现场计算
+                    var errorRate = CalcErrorRate(st.Total, st.Errors);
 
                     // 必须两个条件同时满足，才能告警
                     if (max > 0 && st.Errors >= max &&
-                        rate > 0 && st.ErrorRate >= rate)
+                        rate > 0 && errorRate >= rate)
                     {
-                        span?.AppendTag(new { st.Errors, st.ErrorRate, rate });
+                        span?.AppendTag(new { bucket, st.Errors, errorRate, rate });
 
                         // 一定时间内不要重复报错，除非错误翻倍
                         var error2 = _cache.Get<Int32>("alarm:TraceMinuteStat:" + ti.Id);
@@ -252,13 +287,38 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
                             var group = ti.AlarmGroup;
                             if (group.IsNullOrEmpty()) group = app.Category;
 
+                            st.ErrorRate = errorRate;
+
                             var msg = GetMarkdown(app, st, true);
                             RobotHelper.SendAlarmWithRecord(group, webhook, "埋点告警", msg, "埋点告警", $"{app.Name}/{ti.Name}");
+
+                            // 触发紧急落盘，保证告警依据及时入库
+                            _statService?.TriggerFlush();
+
+                            fired.Add(ti.Id);
                         }
                     }
                 }
             }
         }
+    }
+
+    /// <summary>计算错误率。内存实体尚未经过保存校验，ErrorRate 列可能滞后，需要现场计算</summary>
+    /// <param name="total">总次数</param>
+    /// <param name="errors">错误数</param>
+    /// <returns>错误率，保留4位小数</returns>
+    private static Double CalcErrorRate(Int64 total, Int64 errors) => total == 0 ? 0 : Math.Round((Double)errors / total, 4);
+
+    /// <summary>选择较新的统计值。内存实时值优先于数据库值，避免等待落盘</summary>
+    /// <param name="live">内存实时统计，可能为空</param>
+    /// <param name="db">数据库统计，可能为空</param>
+    /// <returns>较新的统计对象</returns>
+    private static TraceMinuteStat SelectLatest(TraceMinuteStat live, TraceMinuteStat db)
+    {
+        if (live == null) return db;
+        if (db == null || live.Errors >= db.Errors) return live;
+
+        return db;
     }
 
     private String GetMarkdown(AppTracer app, TraceMinuteStat st, Boolean includeTitle)
@@ -269,11 +329,13 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
         sb.AppendLine($">**总数：**<font color=\"red\">{st.Errors}</font>");
         sb.AppendLine($">**错误率：**<font color=\"red\">{st.ErrorRate:p2}</font>");
 
-        var url = setting.WebUrl;
-        var traceUrl = "";
-        if (!url.IsNullOrEmpty())
+        // 多地址配置（英文分号分隔）时，只取第一个（主）地址统一构造跳转链接
+        var primary = GetWebUrl();
+        var sampleUrl = "";
+        if (!primary.IsNullOrEmpty())
         {
-            traceUrl = url.EnsureEnd("/") + $"Monitors/traceData?appId={st.AppId}&kind=minute&time={HttpUtility.UrlEncode(st.StatTime.ToFullString())}&itemId={st.ItemId}&minError=1";
+            // 采样详情页面，用于按追踪标识查看单次调用的错误详情
+            sampleUrl = primary + "Monitors/sampleData";
         }
 
         // 找找具体接口错误
@@ -303,15 +365,13 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
             var sms = SampleData.FindAllByDataIds(ds.Select(e => e.Id).ToArray(), item.StatTime).Where(e => !e.Error.IsNullOrEmpty()).ToList();
             if (sms.Count > 0)
             {
-                var msg = sms[0].Error?.Trim();
-                if (!msg.IsNullOrEmpty())
-                {
-                    // 错误内容取第一行，详情看更多
-                    var p = msg.IndexOfAny(new[] { '\r', '\n' });
-                    if (p > 0) msg = msg[..p];
-
-                    sb.AppendLine($">内容：{msg}");
-                }
+                // 输出错误采样摘要，带上位置、实例与追踪链接
+                AppendErrorSamples(sb, sms, sampleUrl, 3);
+            }
+            else
+            {
+                // 没有采样数据时，说明原因，避免告警只有一句错误而看不出为何没有详情
+                sb.AppendLine($">内容：无错误采样数据，请检查应用采样周期与最大错误采样数设置");
             }
         }
 
@@ -319,12 +379,126 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
         if (str.Length > 1600) str = str[..1600];
 
         // 构造网址
-        if (!traceUrl.IsNullOrEmpty())
-        {
-            str += Environment.NewLine + $"[更多信息]({traceUrl})";
-        }
+        str += BuildMoreInfo($"Monitors/traceData?appId={st.AppId}&kind=minute&time={HttpUtility.UrlEncode(st.StatTime.ToFullString())}&itemId={st.ItemId}&minError=1");
 
         return str;
+    }
+
+    /// <summary>输出错误采样摘要。除异常首行外，附带抛出位置、实例与追踪链接，便于定位问题</summary>
+    /// <param name="sb">消息构造器</param>
+    /// <param name="samples">错误采样数据</param>
+    /// <param name="sampleUrl">采样详情页面地址，为空时不输出追踪链接</param>
+    /// <param name="maxCount">最多输出的采样条数</param>
+    private void AppendErrorSamples(StringBuilder sb, IList<SampleData> samples, String sampleUrl, Int32 maxCount)
+    {
+        if (samples == null || samples.Count == 0) return;
+
+        var count = 0;
+        var keys = new List<String>();
+        foreach (var sm in samples)
+        {
+            if (count >= maxCount) break;
+
+            var error = sm.Error?.Trim();
+            if (error.IsNullOrEmpty()) continue;
+
+            // 异常首行，即异常类型加消息
+            var msg = GetFirstLine(error);
+            if (msg.IsNullOrEmpty()) continue;
+
+            // 同一异常的多次采样只报一次，避免刷屏
+            if (keys.Contains(msg)) continue;
+            keys.Add(msg);
+
+            sb.AppendLine($">内容：{msg}");
+
+            // 堆栈中第一个非框架帧，用于定位抛出位置
+            var frame = GetStackFrame(error);
+            if (!frame.IsNullOrEmpty()) sb.AppendLine($">位置：`{frame}`");
+
+            // 发生时间与耗时。耗时接近阻塞时长时，多为等待被取消，而非真正的执行失败
+            sb.AppendLine($">时间：{sm.Start:HH:mm:ss}，耗时：{sm.Cost:n0}ms");
+
+            // 实例即ip@进程号，同名节点的多个实例可据此区分
+            if (!sm.ClientId.IsNullOrEmpty())
+            {
+                if (!sampleUrl.IsNullOrEmpty() && !sm.TraceId.IsNullOrEmpty())
+                    sb.AppendLine($">实例：{sm.ClientId}，[追踪]({sampleUrl}?traceId={HttpUtility.UrlEncode(sm.TraceId)})");
+                else
+                    sb.AppendLine($">实例：{sm.ClientId}");
+            }
+
+            count++;
+        }
+    }
+
+    /// <summary>取得多行文本的第一行，超长时截断</summary>
+    /// <param name="value">多行文本</param>
+    private static String GetFirstLine(String value)
+    {
+        if (value.IsNullOrEmpty()) return null;
+
+        var p = value.IndexOfAny(['\r', '\n']);
+        var line = p > 0 ? value[..p] : value;
+
+        return Cut(line.Trim(), 160);
+    }
+
+    /// <summary>取得堆栈中第一个非框架调用帧，用于定位业务代码位置</summary>
+    /// <param name="value">异常信息，含堆栈</param>
+    private static String GetStackFrame(String value)
+    {
+        if (value.IsNullOrEmpty()) return null;
+
+        var lines = value.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 1; i < lines.Length && i < 16; i++)
+        {
+            var line = lines[i].Trim();
+            if (!line.StartsWith("at ")) continue;
+
+            var frame = line[3..].Trim();
+            if (frame.IsNullOrEmpty()) continue;
+
+            // 跳过框架内部帧，尽量定位到业务代码
+            if (frame.StartsWith("System.") || frame.StartsWith("Microsoft.") || frame.StartsWith("NewLife.")) continue;
+
+            return Cut(frame, 160);
+        }
+
+        return null;
+    }
+
+    /// <summary>截断字符串，避免单条内容过长挤占整个告警消息</summary>
+    /// <param name="value">原字符串</param>
+    /// <param name="maxLength">最大长度</param>
+    private static String Cut(String value, Int32 maxLength)
+    {
+        if (value.IsNullOrEmpty() || value.Length <= maxLength) return value;
+
+        return value[..maxLength] + "...";
+    }
+
+    /// <summary>取得星尘管理平台基础地址。配置支持英文分号分隔多个地址（多实例部署），统一在此解析与规范化，并只取第一个（主）地址</summary>
+    /// <returns>规范化后的主地址，以/结尾；未配置时返回空字符串</returns>
+    private String GetWebUrl()
+    {
+        var webUrl = setting.WebUrl;
+        if (webUrl.IsNullOrEmpty()) return "";
+
+        // 按英文分号拆分多个地址，去除首尾空白，并统一补全结尾的/
+        var first = webUrl.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+        return first.IsNullOrEmpty() ? "" : first.EnsureEnd("/");
+    }
+
+    /// <summary>构造“更多信息”跳转链接文本。多地址配置时只使用第一个（主）地址</summary>
+    /// <param name="relativeUrl">相对路径（不含基础地址，且不带前导/）</param>
+    /// <returns>链接文本；无配置时返回空字符串</returns>
+    private String BuildMoreInfo(String relativeUrl)
+    {
+        var baseUrl = GetWebUrl();
+        if (baseUrl.IsNullOrEmpty()) return "";
+
+        return Environment.NewLine + $"[更多信息]({baseUrl}{relativeUrl})";
     }
 
     /// <summary>处理环比告警。对比今日与昨日相同时段的错误率变化趋势</summary>
@@ -401,21 +575,11 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
         sb.AppendLine($">**环比：**<font color=\"red\">{st.RingRate:p2}</font>");
         sb.AppendLine($">**折算环比：**<font color=\"red\">{rate:p2}</font>");
 
-        var url = setting.WebUrl;
-        var traceUrl = "";
-        if (!url.IsNullOrEmpty())
-        {
-            traceUrl = url.EnsureEnd("/") + $"Monitors/traceHourStat?appId={st.AppId}&itemId={st.ItemId}";
-        }
-
         var str = sb.ToString();
         if (str.Length > 1600) str = str[..1600];
 
         // 构造网址
-        if (!traceUrl.IsNullOrEmpty())
-        {
-            str += Environment.NewLine + $"[更多信息]({traceUrl})";
-        }
+        str += BuildMoreInfo($"Monitors/traceHourStat?appId={st.AppId}&itemId={st.ItemId}");
 
         return str;
     }
@@ -587,12 +751,7 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
         if (str.Length > 2000) str = str[..2000];
 
         // 构造网址
-        var url = setting.WebUrl;
-        if (!url.IsNullOrEmpty())
-        {
-            url = url.EnsureEnd("/") + "Nodes/NodeData?nodeId=" + node.ID;
-            str += Environment.NewLine + $"[更多信息]({url})";
-        }
+        str += BuildMoreInfo($"Nodes/NodeData?nodeId={node.ID}");
 
         return str;
     }
@@ -733,12 +892,7 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
         if (str.Length > 2000) str = str[..2000];
 
         // 构造网址
-        var url = setting.WebUrl;
-        if (!url.IsNullOrEmpty())
-        {
-            url = url.EnsureEnd("/") + "Nodes/RedisNode?id=" + node.Id;
-            str += Environment.NewLine + $"[更多信息]({url})";
-        }
+        str += BuildMoreInfo($"Nodes/RedisNode?id=" + node.Id);
 
         return str;
     }
@@ -790,12 +944,7 @@ public class AlarmService(StarServerSetting setting, IServiceProvider servicePro
         if (str.Length > 2000) str = str[..2000];
 
         // 构造网址
-        var url = setting.WebUrl;
-        if (!url.IsNullOrEmpty())
-        {
-            url = url.EnsureEnd("/") + "Nodes/RedisMessageQueue?redisId=" + queue.RedisId + "&q=" + queue.Name;
-            str += Environment.NewLine + $"[更多信息]({url})";
-        }
+        str += BuildMoreInfo($"Nodes/RedisMessageQueue?redisId=" + queue.RedisId + "&q=" + queue.Name);
 
         return str;
     }

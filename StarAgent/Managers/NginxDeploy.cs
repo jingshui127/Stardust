@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using NewLife;
 using NewLife.Log;
 
@@ -181,15 +181,15 @@ internal class NginxDeploy
     {
         // 判断配置文件是否存在，然后拷贝到nginx配置目录，并重新加载nginx配置
         if (String.IsNullOrEmpty(SiteFile) || String.IsNullOrEmpty(ConfigPath))
-            throw new InvalidOperationException("配置文件或nginx路径未设置");
+            throw new InvalidOperationException(Localization.Translate("The configuration file or nginx path is not set."));
 
         if (!File.Exists(SiteFile))
-            throw new FileNotFoundException("配置文件不存在", SiteFile);
+            throw new FileNotFoundException(Localization.Translate("The configuration file does not exist."), SiteFile);
 
         // 目标nginx配置目录
         var targetDir = ConfigPath;
         if (String.IsNullOrEmpty(targetDir) || !Directory.Exists(targetDir))
-            throw new DirectoryNotFoundException("nginx配置目录不存在");
+            throw new DirectoryNotFoundException(Localization.Translate("The nginx configuration directory does not exist."));
 
         // 拷贝配置文件
         var targetFile = targetDir.CombinePath(Path.GetFileName(SiteFile));
@@ -199,16 +199,16 @@ internal class NginxDeploy
         if (File.Exists(targetFile) && File.ReadAllText(SiteFile).MD5() == File.ReadAllText(targetFile).MD5())
             return false;
 
-        WriteLog("正在发布站点配置到nginx：{0} => {1}", SiteFile, targetFile);
+        WriteLog("Publishing site configuration to nginx: {0} => {1}", SiteFile, targetFile);
         File.Copy(SiteFile, targetFile, true);
 
         // 重新加载nginx配置
-        WriteLog("正在重新加载nginx配置...");
+        WriteLog("Reloading nginx configuration...");
         if (Runtime.Windows)
             targetDir.CombinePath("../nginx.exe").Run("-s reload", 5_000);
         else
             "nginx".Run("-s reload", 5_000);
-        WriteLog("nginx配置重新加载完成。");
+        WriteLog("nginx configuration reloaded.");
 
         return true;
     }
@@ -254,7 +254,7 @@ internal class NginxDeploy
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException("重载nginx配置失败: " + ex.Message, ex);
+            throw new InvalidOperationException(L.T("Failed to reload nginx configuration: ") + ex.Message, ex);
         }
     }
     #endregion

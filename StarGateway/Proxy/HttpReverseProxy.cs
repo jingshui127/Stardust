@@ -104,7 +104,7 @@ public class HttpReverseProxy : ProxyServer
         _timer = new TimerX(DoRefreshConfig, null, ConfigRefreshInterval * 1000, ConfigRefreshInterval * 1000) { Async = true };
         _healthTimer = new TimerX(DoHealthCheck, null, HealthCheckInterval * 1000, HealthCheckInterval * 1000) { Async = true };
 
-        WriteLog("Http反向代理启动，监听端口：{0}，路由数：{1}", Port, _routes?.Count ?? 0);
+        WriteLog("HTTP reverse proxy started, listening on port {0}, route count: {1}", Port, _routes?.Count ?? 0);
         base.OnStart();
     }
     #endregion
@@ -126,7 +126,7 @@ public class HttpReverseProxy : ProxyServer
         }
         catch (Exception ex)
         {
-            WriteError("加载SSL证书配置失败：{0}", ex.Message);
+            WriteError("Failed to load the SSL certificate configuration: {0}", ex.Message);
         }
     }
 
@@ -135,7 +135,7 @@ public class HttpReverseProxy : ProxyServer
     {
         if (certs == null || certs.Count == 0)
         {
-            WriteLog("未配置SSL证书，仅支持HTTP");
+            WriteLog("No SSL certificate configured; only HTTP is supported");
             return;
         }
 
@@ -166,12 +166,12 @@ public class HttpReverseProxy : ProxyServer
 #pragma warning restore SYSLIB0057
                 Certificate = x509;
                 SslProtocol = SslProtocols.Tls12;
-                WriteLog("加载SSL证书: {0} -> {1}", cert.Domain, x509.Subject);
+                WriteLog("Loading SSL certificate: {0} -> {1}", cert.Domain, x509.Subject);
                 break;
             }
             catch (Exception ex)
             {
-                WriteError("加载证书 {0} 失败：{1}", file, ex.Message);
+                WriteError("Failed to load certificate {0}: {1}", file, ex.Message);
             }
         }
     }
@@ -194,7 +194,7 @@ public class HttpReverseProxy : ProxyServer
         }
         catch (Exception ex)
         {
-            WriteError("从StarServer加载配置失败：{0}", ex.Message);
+            WriteError("Failed to load configuration from {0}: {1}", "StarServer", ex.Message);
         }
 
         // 2. 从数据库加载（StarServer 后台写入的同一数据库，作为主要兜底源）
@@ -203,13 +203,13 @@ public class HttpReverseProxy : ProxyServer
             LoadConfig();
             if (_routes != null && _routes.Count > 0)
             {
-                WriteLog("从数据库加载路由配置完成，共 {0} 条路由", _routes.Count);
+                WriteLog("Loaded route configuration from the database: {0} route(s)", _routes.Count);
                 return;
             }
         }
         catch (Exception ex)
         {
-            WriteError("从数据库加载配置失败：{0}", ex.Message);
+            WriteError("Failed to load configuration from {0}: {1}", "database", ex.Message);
         }
 
         // 3. 从本地配置文件兜底
@@ -219,7 +219,7 @@ public class HttpReverseProxy : ProxyServer
         }
         catch (Exception ex)
         {
-            WriteError("从本地文件加载配置失败：{0}", ex.Message);
+            WriteError("Failed to load configuration from {0}: {1}", "local file", ex.Message);
         }
     }
 
@@ -278,13 +278,13 @@ public class HttpReverseProxy : ProxyServer
             // P1-1：远程路由为空时视为未提供有效配置，直接回退数据库（不覆盖、不阻断）
             if (routes.Count == 0)
             {
-                WriteLog("从 StarServer 拉取的路由为空，回退数据库");
+                WriteLog("Routes fetched from StarServer are empty; falling back to the database");
                 return false;
             }
 
             Interlocked.Exchange(ref _routes, routes);
             _configSource = "server";
-            WriteLog("从 StarServer 拉取路由配置完成，共 {0} 条路由", routes.Count);
+            WriteLog("Fetched route configuration from StarServer: {0} route(s)", routes.Count);
 
             // 证书同源覆盖：仅当远程确实下发证书时才覆盖并跳过数据库证书加载；
             // 若远程证书列表为空，_configFromServer 保持 0（未覆盖），由上层回退查库
@@ -298,7 +298,7 @@ public class HttpReverseProxy : ProxyServer
                     if (!_warnedInsecureServer)
                     {
                         _warnedInsecureServer = true;
-                        WriteError("StarServer 使用明文 http，出于安全考虑拒绝从远程加载证书（私钥密码会在链路上暴露），证书回退数据库加载；生产环境请改用 https");
+                        WriteError("StarServer is using plain HTTP. Remote certificate loading is refused for security because the private key password would be exposed on the wire; falling back to the database. Use HTTPS in production.");
                     }
                 }
                 else
@@ -311,7 +311,7 @@ public class HttpReverseProxy : ProxyServer
         }
         catch (Exception ex)
         {
-            WriteError("从 StarServer 拉取配置失败，回退数据库：{0}", ex.Message);
+            WriteError("Failed to fetch configuration from StarServer; falling back to the database: {0}", ex.Message);
             return false;
         }
     }
@@ -382,7 +382,7 @@ public class HttpReverseProxy : ProxyServer
         foreach (var kv in targets) _directTargets[kv.Key] = kv.Value;
         Interlocked.Exchange(ref _routes, routes);
         _configSource = "file";
-        WriteLog("从本地文件 {0} 加载路由配置，共 {1} 条（本地兜底）", file, routes.Count);
+        WriteLog("Loaded route configuration from local file {0}: {1} route(s) (local fallback)", file, routes.Count);
     }
 
     protected virtual void LoadConfig()
@@ -395,7 +395,7 @@ public class HttpReverseProxy : ProxyServer
         }
         catch (Exception ex)
         {
-            WriteError("加载路由配置失败：{0}", ex.Message);
+            WriteError("Failed to load route configuration: {0}", ex.Message);
         }
     }
 
@@ -433,7 +433,7 @@ public class HttpReverseProxy : ProxyServer
                 {
                     node.IsHealthy = healthy;
                     node.Update();
-                    WriteLog("健康检查: {0} -> {1}", node.Address, healthy ? "🟢" : "🔴");
+                    WriteLog("Health check: {0} -> {1}", node.Address, healthy ? "🟢" : "🔴");
                 }
             }
         }
@@ -574,8 +574,8 @@ public class HttpReverseProxy : ProxyServer
         // P1-3：Admin API 鉴权。回环地址默认可访问（本机运维工具）；非回环需配置 AdminToken 且请求携带匹配令牌
         if (!IsAdminAuthorized(session, request))
         {
-            var body = "Admin API 需要鉴权"u8.ToArray();
-            session.Send($"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"Stardust网关：用户名随意，密码填AdminToken\"\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
+            var body = "Admin API authentication required"u8.ToArray();
+            session.Send($"HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"Stardust gateway: any user name, use AdminToken as the password\"\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
             session.Send(body);
             session.Dispose();
             return true;
@@ -625,7 +625,7 @@ public class HttpReverseProxy : ProxyServer
         else if (path.EqualIgnoreCase("/api/refresh"))
         {
             RefreshConfig();
-            json = new { success = true, message = "配置已刷新" }.ToJson();
+            json = new { success = true, message = L.T("Configuration refreshed.") }.ToJson();
         }
         else
         {
@@ -736,7 +736,7 @@ public class HttpReverseProxy : ProxyServer
         }
         catch (Exception ex)
         {
-            WriteError("调用StarAgent启动服务失败 {0}：{1}", serviceName, ex.Message);
+            WriteError("Failed to start service {0} via StarAgent: {1}", serviceName, ex.Message);
             return false;
         }
     }
@@ -756,7 +756,7 @@ public class HttpReverseProxy : ProxyServer
         }
         catch (Exception ex)
         {
-            WriteError("调用StarAgent停止服务失败 {0}：{1}", serviceName, ex.Message);
+            WriteError("Failed to stop service {0} via StarAgent: {1}", serviceName, ex.Message);
             return false;
         }
     }
@@ -783,7 +783,7 @@ public class HttpReverseProxy : ProxyServer
                     // 空闲时间超过阈值，且不是当前健康节点
                     if ((now - last).TotalSeconds > IdleTimeout && !node.IsHealthy)
                     {
-                        AdminLog?.Info("空闲回收: {0} 超过 {1} 秒无活动", key, IdleTimeout);
+                        AdminLog?.Info("Idle recycle: {0} has been inactive for more than {1} seconds", key, IdleTimeout);
                         // 可以调用StarAgent停止服务
                         // await StopBackend(key, serviceName);
                     }
@@ -846,7 +846,7 @@ public class HttpReverseSession : ProxySession
             if (isUpgrade && route != null && !route.WebSocket)
             {
                 // 路由禁止WebSocket，返回400
-                proxy.AdminLog?.Info("WebSocket被路由 {0} 禁止: {1} {2}", route.Name, method, path);
+                proxy.AdminLog?.Info("WebSocket is forbidden by route {0}: {1} {2}", route.Name, method, path);
                 var body = "WebSocket upgrade not allowed for this route"u8.ToArray();
                 Send($"HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain\r\nContent-Length: {body.Length}\r\nConnection: close\r\n\r\n");
                 Send(body);
@@ -873,7 +873,7 @@ public class HttpReverseSession : ProxySession
                 if (staticRoot.IsNullOrEmpty())
                 {
                     // 开启了静态路由但没设置根目录，直接返回404
-                    proxy.AdminLog?.Info("Static {0} {1} -> 404 静态路由未配置根目录", method, path);
+                    proxy.AdminLog?.Info("Static {0} {1} -> 404 {2}", method, path, "static route has no root directory configured");
                     Send("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray());
                     Dispose();
                     return;
@@ -907,7 +907,7 @@ public class HttpReverseSession : ProxySession
                 }
 
                 // 静态文件处理失败（文件不存在等），不再继续转发
-                proxy.AdminLog?.Info("Static {0} {1} -> 404 文件不存在", method, path);
+                proxy.AdminLog?.Info("Static {0} {1} -> 404 {2}", method, path, "file not found");
                 Send("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"u8.ToArray());
                 Dispose();
                 return;
@@ -940,7 +940,7 @@ public class HttpReverseSession : ProxySession
                 else
                 {
                     // 没有可用节点，尝试冷启动
-                    proxy.WriteError("路由 {0} 没有可用的后端节点", route.Name);
+                    proxy.WriteError("Route {0} has no available backend nodes", route.Name);
                     _ = TryColdStart(proxy, route);
                 }
             }
@@ -1017,7 +1017,7 @@ public class HttpReverseSession : ProxySession
         catch (Exception ex)
         {
             // 兜底：HandleAdminRequest 等任意环节抛异常时，返回 500 并释放连接，避免客户端挂起
-            proxy?.WriteError("处理请求异常 {0} {1}：{2}", method, path, ex.Message);
+            proxy?.WriteError("Error handling request {0} {1}: {2}", method, path, ex.Message);
             // 标记追踪片段为错误，使 APM 正确反映失败请求（否则 Dispose 会把异常请求记成成功）
             (_span as ISpan)?.SetError(ex, null);
             SendErrorResponse(500, "Internal Server Error");
@@ -1047,7 +1047,7 @@ public class HttpReverseSession : ProxySession
                 _upgraded = true;
                 if (Host is HttpReverseProxy proxy)
                 {
-                    proxy.AdminLog?.Info("WS 升级成功: {0}", _targetAddress);
+                    proxy.AdminLog?.Info("WS upgrade succeeded: {0}", _targetAddress);
                 }
             }
         }
@@ -1068,7 +1068,7 @@ public class HttpReverseSession : ProxySession
         {
             if (node.Enable && !node.IsHealthy)
             {
-                proxy.AdminLog?.Info("冷启动: 尝试唤醒 {0} (路由: {1})", node.Address, route.Name);
+                proxy.AdminLog?.Info("Cold start: trying to wake {0} (route: {1})", node.Address, route.Name);
                 await proxy.StartBackend(node.Address, node.Name);
                 break;
             }

@@ -1,0 +1,9 @@
+# 简体中文译文。键为英文源文，缺失时运行期回退英文。
+"[{0}] Login succeeded, node code: {1}": "[{0}] 登录成功，节点编码：{1}"
+"[{0}] Starting agent, server: {1}": "[{0}] 启动代理，服务端：{1}"
+"[{0}] Startup failed: {1}": "[{0}] 启动失败：{1}"
+# 运行时消息补充词条
+"The current platform ({0}) does not support this command": "当前平台（{0}）不支持该指令"
+"Parameter is empty.": "参数为空"
+"Stardust mobile agent core": "星尘移动代理核心"
+"Shared core of the Stardust agent for mobile platforms. Provides platform-independent login, heartbeat, device information collection, and command dispatch for Android and iOS hosts.": "星尘代理移动端共享核心。提供登录心跳、设备信息采集、命令下发的平台无关实现，供 Android 与 iOS 宿主复用。"

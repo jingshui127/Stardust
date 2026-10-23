@@ -3,11 +3,11 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>StarServer</AssemblyName>
-    <AssemblyTitle>科控物联服务平台</AssemblyTitle>
-    <Description>科控物联分布式服务平台后端核心。提供配置中心、注册中心、服务发现、远程发布、性能监控、日志中心等核心 API 服务，支持应用注册、配置下发、指标聚合、统计计算与任务调度，可横向扩展。</Description>
-    <Company>科控物联</Company>
-    <Copyright>©2002-2026 TC</Copyright>
-    <VersionPrefix>3.10</VersionPrefix>
+    <AssemblyTitle>Stardust service platform</AssemblyTitle>
+    <Description>Backend core of the Stardust distributed service platform. Provides core API services for configuration center, registry, service discovery, remote deployment, performance monitoring, and log center, supporting application registration, configuration delivery, metric aggregation, statistics, and task scheduling, and can scale horizontally.</Description>
+    <Company>新生命开发团队</Company>
+    <Copyright>©2002-2026 NewLife</Copyright>
+    <VersionPrefix>3.7</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
     <FileVersion>$(Version)</FileVersion>
@@ -31,15 +31,19 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.IP" Version="2.5.2026.804" />
-    <PackageReference Include="NewLife.Redis" Version="6.6.2026.901" />
-    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.9.2026.901" />
+    <PackageReference Include="NewLife.IP" Version="2.5.2026.1019-beta1510" />
+    <PackageReference Include="NewLife.Redis" Version="6.6.2026.1019-beta1511" />
+    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.9.2026.1019-beta1013" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Stardust.Data\Stardust.Data.csproj" />
     <ProjectReference Include="..\Stardust.Extensions\Stardust.Extensions.csproj" />
     <ProjectReference Include="..\Stardust\Stardust.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
   </ItemGroup>
 
 </Project>

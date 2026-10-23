@@ -51,8 +51,10 @@ public class StarFactory : DisposeBase
     /// <summary>应用密钥</summary>
     public String? Secret { get; set; }
 
+    private String? _clientId;
     /// <summary>实例。应用可能多实例部署，ip@proccessid</summary>
-    public String? ClientId { get; set; }
+    /// <remarks>首次联网之前IP可能为空，此时为“@进程号”；获得IP后自动补全为完整标识</remarks>
+    public String? ClientId { get => _clientId ?? Runtime.ClientId; set => _clientId = value; }
 
     /// <summary>客户端</summary>
     public IApiClient? Client => _client?.Client;
@@ -109,7 +111,7 @@ public class StarFactory : DisposeBase
     #region 初始化注册
     private void Init()
     {
-        XTrace.WriteLine("正在初始化星尘……");
+        XTrace.WriteLine("Initializing Stardust...");
 
         Local = new LocalStarClient { Log = Log };
 
@@ -190,7 +192,7 @@ public class StarFactory : DisposeBase
                 if (!server.IsNullOrEmpty())
                 {
                     if (Server.IsNullOrEmpty()) Server = server;
-                    XTrace.WriteLine("本机星尘探测：{0} Cost={1}ms", server, sw.ElapsedMilliseconds);
+                    XTrace.WriteLine("Local stardust probe: {0}, cost={1}ms", server, sw.ElapsedMilliseconds);
 
                     if (set.Server.IsNullOrEmpty())
                     {
@@ -199,14 +201,14 @@ public class StarFactory : DisposeBase
                     }
                 }
                 else
-                    XTrace.WriteLine("本机星尘探测：StarAgent Not Found, Cost={0}ms", sw.ElapsedMilliseconds);
+                    XTrace.WriteLine("Local stardust probe: StarAgent not found, cost={0}ms", sw.ElapsedMilliseconds);
 
                 if (inf != null && !inf.PluginServer.IsNullOrEmpty() && !AppId.EqualIgnoreCase("StarWeb", "StarServer"))
                 {
                     var core = Setting.Current;
                     if (!inf.PluginServer.EqualIgnoreCase(core.PluginServer))
                     {
-                        XTrace.WriteLine("据星尘代理公布，插件服务器PluginServer变更为 {0}", inf.PluginServer);
+                        XTrace.WriteLine("According to the Stardust agent, the PluginServer has changed to {0}", inf.PluginServer);
                         core.PluginServer = inf.PluginServer;
                         core.Save();
                     }
@@ -214,7 +216,7 @@ public class StarFactory : DisposeBase
             }
             catch (Exception ex)
             {
-                XTrace.Log.Error("本机星尘探测失败！{0} Cost={1}ms", ex.Message, sw.ElapsedMilliseconds);
+                XTrace.Log.Error("Local stardust probe failed: {0}, cost={1}ms", ex.Message, sw.ElapsedMilliseconds);
             }
         }
 
@@ -229,7 +231,6 @@ public class StarFactory : DisposeBase
         set.Secret = Secret;
         set.Save();
 
-        // 生成ClientId，用于唯一标识当前实例，默认IP@pid
         try
         {
             // 从SysConfig读取系统名称，其受到命令行参数-Name和环境变量Name影响，方便单应用多部署（参数区分应用名）
@@ -244,15 +245,13 @@ public class StarFactory : DisposeBase
                 if (AppId.IsNullOrEmpty()) AppId = asm.Name;
                 if (AppName.IsNullOrEmpty()) AppName = asm.Title;
             }
-
-            ClientId = $"{NetHelper.MyIP()}@{Process.GetCurrentProcess().Id}";
         }
         catch
         {
-            ClientId = Rand.NextString(8);
+            // 忽略推导失败的异常，ClientId 由属性惰性生成
         }
 
-        XTrace.WriteLine("接入星尘平台：Server={0} AppId={1} ClientId={2}", Server, AppId, ClientId);
+        XTrace.WriteLine("Connecting to the Stardust platform: Server={0} AppId={1} ClientId={2}", Server, AppId, ClientId);
 
         Valid();
     }
@@ -289,7 +288,6 @@ public class StarFactory : DisposeBase
                 AppId = AppId,
                 AppName = AppName,
                 Secret = Secret,
-                ClientId = ClientId,
                 NodeCode = Local?.Info?.Code,
                 Setting = set,
 
@@ -302,7 +300,7 @@ public class StarFactory : DisposeBase
 #endif
 
             var p = Process.GetCurrentProcess();
-            client.WriteInfoEvent("应用启动", $"pid={p.Id}, Name={p.GetProcessName()}, FileName={p.MainModule?.FileName}");
+            client.WriteInfoEvent("AppStart", $"pid={p.Id}, Name={p.GetProcessName()}, FileName={p.MainModule?.FileName}");
 
             _client = client;
 
@@ -371,14 +369,13 @@ public class StarFactory : DisposeBase
     {
         if (Server.IsNullOrEmpty()) return;
 
-        XTrace.WriteLine("星尘监控中心：ITracer采集并上报应用埋点数据，自动埋点Api接口、Http请求、数据库操作、Redis操作等。可用于监控系统健康状态，分析分布式系统的调用链和性能瓶颈。");
+        XTrace.WriteLine("Stardust monitoring center: ITracer collects and reports application tracing data, automatically instrumenting API endpoints, HTTP requests, database operations, and Redis operations. It can be used to monitor system health and analyze call chains and performance bottlenecks in distributed systems.");
 
         var tracer = new StarTracer()
         {
             Factory = this,
             AppId = AppId,
             AppName = AppName,
-            ClientId = ClientId,
             Client = _client,
 
             Log = Log
@@ -403,7 +400,7 @@ public class StarFactory : DisposeBase
             {
                 if (!Valid()) return null;
 
-                XTrace.WriteLine("星尘配置中心：IConfigProvider集中管理配置，自动从配置中心加载配置数据并支持变更实时下发，包括XCode数据库连接字符串等。配置中心同时支持分配应用实例的唯一WorkerId，确保Snowflake算法能够生成绝对唯一的雪花Id");
+                XTrace.WriteLine("Stardust configuration center: IConfigProvider centrally manages configuration, automatically loads configuration data from the configuration center, and supports real-time change delivery, including XCode database connection strings. The configuration center also assigns a unique WorkerId to each application instance, ensuring that the Snowflake algorithm generates absolutely unique snowflake IDs.");
 
                 var config = new StarHttpConfigProvider
                 {
@@ -462,7 +459,7 @@ public class StarFactory : DisposeBase
 
                 _initService = true;
 
-                XTrace.WriteLine("星尘注册中心：IRegistry提供服务发现能力，可根据服务名自动获取所有提供者的节点地址，并创建调用服务的IApiClient客户端，并根据服务提供者的上线与下线自动新增或减少服务地址。");
+                XTrace.WriteLine("Stardust registry: IRegistry provides service discovery; it automatically obtains the node addresses of all providers by service name and creates an IApiClient for calling the service, adding or removing addresses as providers come online or go offline.");
             }
 
             return _client;

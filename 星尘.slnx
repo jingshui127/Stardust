@@ -4,10 +4,6 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
-  <Folder Name="/Cube/">
-    <Project Path="Cube/NewLife.Cube.Swagger/NewLife.Cube.Swagger.csproj" />
-    <Project Path="Cube/NewLife.Cube/NewLife.Cube.csproj" />
-  </Folder>
   <Folder Name="/Plugins/">
     <Project Path="Plugins/AgentExpansion/AgentExpansion.csproj" />
     <Project Path="Plugins/MySqlAgent/MySqlAgent.csproj" />
@@ -23,7 +19,7 @@
     <File Path=".github/workflows/publish-beta.yml" />
     <File Path=".github/workflows/publish.yml" />
     <File Path=".github/workflows/test.yml" />
-    <File Path="Readme.MD" />
+    <File Path="README.md" />
   </Folder>
   <Folder Name="/UnitTest/">
     <Project Path="ClientTest/ClientTest.csproj" />
@@ -31,6 +27,7 @@
   </Folder>
   <Project Path="DeployAgent/DeployAgent.csproj" />
   <Project Path="StarAgent/StarAgent.csproj" />
+  <Project Path="StarAgent.Mobile/StarAgent.Mobile.csproj" />
   <Project Path="Stardust.Data/Stardust.Data.csproj" />
   <Project Path="Stardust.Extensions/Stardust.Extensions.csproj" />
   <Project Path="Stardust.Server/Stardust.Server.csproj" />

@@ -78,7 +78,7 @@ public abstract class DefaultFileStorage : DisposeBase, IFileStorage, ILogFeatur
     {
         if (Interlocked.Exchange(ref _initialized, 1) == 1) return;
 
-        WriteLog("[{0}]初始化分布式文件存储，节点：{1}", Name, NodeName);
+        WriteLog("[{0}] Initialized distributed file storage, nodes: {1}", Name, NodeName);
         using var span = Tracer?.NewSpan("FileStorage-Init", new { Name, NodeName });
 
         await OnInitializedAsync(cancellationToken).ConfigureAwait(false);
@@ -142,14 +142,29 @@ public abstract class DefaultFileStorage : DisposeBase, IFileStorage, ILogFeatur
     /// <summary>处理新文件消息。</summary>
     protected virtual async Task OnNewFileInfoAsync(NewFileInfo info, IEventContext context, CancellationToken cancellationToken)
     {
+        // 附加消费上下文，便于排查问题（仅加标签，不改动消费逻辑）。
+        // 【为什么用 DefaultSpan.Current，而不是下面 NewSpan 得到的 span】
+        //   1) 下游 NewLife.Redis 消费循环中本回调执行时，RedisEventBus.ConsumeAsync 会先把 DefaultSpan.Current 置 null（打断调用链），
+        //      再 new 一个 redismq:{topic}:Consume 子 span 压栈，因此本回调里 DefaultSpan.Current 实际指向 redismq:{topic}:Consume，
+        //      并非 redis:RedisQueue:XREADGROUP-GROUP 命令 span（后者在 RedisClient.ExecuteAsync 内部 new、已自带命令参数 Tag）。
+        //   2) 故本标签打在 redismq:{topic}:Consume 上，对该埋点自身排查有用；redis: 命令 span 由 Redis 客户端内部 new，
+        //      本回调无法跨生命周期给它追加业务标签（且取消时无消息体可加），所以对 redis: 告警不带本标签。
+        //   3) 下面的 Tracer.NewSpan("FileStorage-NewFile") 会新建一个星尘自建子 span，其标签同样只属于 FileStorage-NewFile 这条埋点。
+        //   4) 时序：NewSpan 一执行就压栈成为新的 Current；本 AppendTag 必须在 NewSpan 之前取 DefaultSpan.Current，
+        //      否则拿到的是刚建的 FileStorage-NewFile，而非 redismq:{topic}:Consume。
+        //   DefaultSpan.Current 可能为 null（上游无 span），用 ?. 保证零侵入、不新增埋点。
+        DefaultSpan.Current?.AppendTag(new { topic = "NewFile", consumer = Runtime.ClientId, sourceNode = info.SourceNode, nodeName = NodeName, fileId = info.Id, path = info.Path });
+
         var msg = info.ToJson();
         using var span = Tracer?.NewSpan("FileStorage-NewFile", msg);
         span?.Detach(info.TraceId);
+        // 本 span 是星尘自建的子 span（FileStorage-NewFile），标签只属于该埋点，不会进入 redis: 告警
+        span?.AppendTag(new { topic = "NewFile", sourceNode = info.SourceNode, nodeName = NodeName, fileId = info.Id, path = info.Path });
 
         // 默认忽略本节点自己发布的消息（除非需要自愈）
         if (info.SourceNode.EqualIgnoreCase(NodeName)) return;
 
-        WriteLog("收到新文件通知：{0}", msg);
+        WriteLog("Received new file notification: {0}", msg);
 
         // 检查本地是否已有文件且哈希正确。上传方可能还在处理（如向zip包注入配置），延迟重试几次再判定缺失
         if (!CheckLocalFile(info.Path, info.Hash))
@@ -195,14 +210,14 @@ public abstract class DefaultFileStorage : DisposeBase, IFileStorage, ILogFeatur
         if (sourceNode.IsNullOrEmpty()) throw new ArgumentNullException(nameof(sourceNode));
 
         if (!_nodeAddresses.TryGetValue(sourceNode, out var addr))
-            throw new InvalidDataException($"无法解析节点[{sourceNode}]的地址");
+            throw new InvalidDataException(L.T("Failed to resolve the address of node [{0}]", sourceNode));
 
         var url = DownloadUri;
         url = url.Replace("{Id}", file.Id + "");
         url = url.Replace("{Name}", file.Name);
 
         using var span = Tracer?.NewSpan("FileStorage-FetchFile", new { file.Name, url });
-        WriteLog("下载文件：{0}，来源：{1}", file.Name, url);
+        WriteLog("Download file {0}, source: {1}", file.Name, url);
         try
         {
             var fileName = RootPath.CombinePath(file.Path).GetFullPath();
@@ -230,12 +245,12 @@ public abstract class DefaultFileStorage : DisposeBase, IFileStorage, ILogFeatur
             // 使用竞速下载
             await client.DownloadFileRaceAsync(url, fileName, file.Hash, false, cancellationToken).ConfigureAwait(false);
 
-            WriteLog("下载文件：{0}，成功：{1}", file.Name, client.Current?.Address);
+            WriteLog("Download file {0}, success: {1}", file.Name, client.Current?.Address);
         }
         catch (Exception ex)
         {
             span?.SetError(ex);
-            WriteLog("下载文件：{0}，异常：{1}", file.Name, ex.Message);
+            WriteLog("Download file {0}, error: {1}", file.Name, ex.Message);
         }
     }
     #endregion
@@ -281,9 +296,24 @@ public abstract class DefaultFileStorage : DisposeBase, IFileStorage, ILogFeatur
 
         if (req.RequestNode.EqualIgnoreCase(NodeName)) return;
 
-        WriteLog("收到请求文件通知：{0}", req.ToJson());
+        WriteLog("Received file request notification: {0}", req.ToJson());
+
+        // 附加消费上下文，便于排查问题（仅加标签，不改动消费逻辑）。
+        // 【为什么用 DefaultSpan.Current，而不是下面 NewSpan 得到的 span】
+        //   1) 下游 NewLife.Redis 消费循环中本回调执行时，RedisEventBus.ConsumeAsync 会先把 DefaultSpan.Current 置 null（打断调用链），
+        //      再 new 一个 redismq:{topic}:Consume 子 span 压栈，因此本回调里 DefaultSpan.Current 实际指向 redismq:{topic}:Consume，
+        //      并非 redis:RedisQueue:XREADGROUP-GROUP 命令 span（后者在 RedisClient.ExecuteAsync 内部 new、已自带命令参数 Tag）。
+        //   2) 故本标签打在 redismq:{topic}:Consume 上，对该埋点自身排查有用；redis: 命令 span 由 Redis 客户端内部 new，
+        //      本回调无法跨生命周期给它追加业务标签（且取消时无消息体可加），所以对 redis: 告警不带本标签。
+        //   3) 下面的 Tracer.NewSpan("FileStorage-FileRequest") 会新建一个星尘自建子 span，其标签同样只属于 FileStorage-FileRequest 这条埋点。
+        //   4) 时序：NewSpan 一执行就压栈成为新的 Current；本 AppendTag 必须在 NewSpan 之前取 DefaultSpan.Current，
+        //      否则拿到的是刚建的 FileStorage-FileRequest，而非 redismq:{topic}:Consume。
+        //   DefaultSpan.Current 可能为 null（上游无 span），用 ?. 保证零侵入、不新增埋点。
+        DefaultSpan.Current?.AppendTag(new { topic = "FileRequest", consumer = Runtime.ClientId, requestNode = req.RequestNode, nodeName = NodeName, fileId = req.Id });
 
         using var span = Tracer?.NewSpan("FileStorage-FileRequest", new { req.Name, req.RequestNode });
+        // 本 span 是星尘自建的子 span（FileStorage-FileRequest），标签只属于该埋点，不会进入 redis: 告警
+        span?.AppendTag(new { topic = "FileRequest", requestNode = req.RequestNode, nodeName = NodeName, fileId = req.Id });
 
         // 若本地已存在且哈希正确，则再次宣告新文件，复用扩散流程
         var exists = CheckLocalFile(req.Path, req.Hash);

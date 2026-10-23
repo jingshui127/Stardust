@@ -48,9 +48,9 @@ public class FrameworkManager
     private String? DoInstall(String? argument)
     {
         var model = argument?.ToJsonEntity<FrameworkModel>();
-        if (model == null || model.Version.IsNullOrEmpty()) throw new Exception("未指定版本！");
+        if (model == null || model.Version.IsNullOrEmpty()) throw new Exception(L.T("No version was specified."));
 
-        WriteLog($"安装 {model.Version}");
+        WriteLog(L.TLog("Installing {0}", model.Version));
 
         var nr = new NetRuntime
         {
@@ -74,6 +74,18 @@ public class FrameworkManager
             }
 
             nr.InstallNetOnLinux(ver, kind);
+        }
+        else if (Runtime.OSX)
+        {
+            var kind = "";
+            var p = ver.IndexOf('-');
+            if (p > 0)
+            {
+                kind = ver.Substring(p + 1);
+                ver = ver.Substring(0, p);
+            }
+
+            nr.InstallNetOnOSX(ver, kind);
         }
         else if (ver.StartsWithIgnoreCase("4.0"))
         {
@@ -119,21 +131,21 @@ public class FrameworkManager
                 nr.InstallNet("v" + ver.Substring(0, pv), ver, kind);
             }
             else
-                throw new Exception($"不支持的.NET版本[{ver}]");
+                throw new Exception(L.T("Unsupported .NET version [{0}]", ver));
         }
 
         CheckPing();
 
-        return "安装成功";
+        return L.T("Installation completed.");
     }
 
     private String? DoUninstall(String? argument)
     {
         var model = argument?.ToJsonEntity<FrameworkModel>();
-        if (model == null || model.Version.IsNullOrEmpty()) throw new Exception("未指定版本！");
+        if (model == null || model.Version.IsNullOrEmpty()) throw new Exception(L.T("No version was specified."));
 
         var ver = model.Version;
-        WriteLog($"卸载 {ver}");
+        WriteLog(L.TLog("Uninstalling {0}", ver));
 
         //目前仅支持NetCore
         var rs = false;
@@ -153,12 +165,12 @@ public class FrameworkManager
 
         CheckPing();
 
-        return rs ? "卸载成功" : "卸载失败";
+        return rs ? L.T("Uninstalled successfully") : L.T("Uninstall failed");
     }
 
     Boolean Uninstall(String verion)
     {
-        WriteLog($"卸载 {verion}");
+        WriteLog(L.TLog("Uninstalling {0}", verion));
 
         var ver = verion.Trim('v', 'V');
         var p = ver.IndexOf('-');
@@ -176,8 +188,8 @@ public class FrameworkManager
         }
         else
         {
-            WriteLog("暂不支持当前OS卸载");
-            throw new Exception("暂不支持当前OS卸载");
+            WriteLog(L.TLog("Uninstalling is not supported on the current OS."));
+            throw new Exception(L.T("Uninstalling is not supported on the current OS."));
         }
 
         var paths = new String[] { "host/fxr", "shared/Microsoft.NETCore.App", "shared/Microsoft.AspNetCore.App", "shared/Microsoft.WindowsDesktop.App" };
@@ -191,19 +203,19 @@ public class FrameworkManager
                 {
                     Directory.Delete(dir, true);
                     rs = true;
-                    WriteLog($"删除 {item}/{ver}");
+                    WriteLog(L.TLog("Deleting {0}/{1}", item, ver));
                 }
                 catch (Exception ex)
                 {
-                    WriteLog($"卸载时出现异常 {ex.Message}");
+                    WriteLog(L.TLog("Error while uninstalling: {0}", ex.Message));
                 }
             }
         }
 
         if (rs)
-            WriteLog("{0} 卸载成功", verion);
+            WriteLog("{0} uninstalled successfully", verion);
         else
-            WriteLog("{0} 卸载失败", verion);
+            WriteLog("Failed to uninstall {0}", verion);
 
         return rs;
     }
@@ -234,12 +246,12 @@ public class FrameworkManager
     /// <param name="args"></param>
     public void WriteLog(String format, params Object?[] args)
     {
-        Log?.Info($"[FrameworkManager]{format}", args);
+        Log?.InfoPrefixed("[FrameworkManager]", format, args);
 
         var msg = (args == null || args.Length == 0) ? format : String.Format(format, args);
         DefaultSpan.Current?.AppendTag(msg);
 
-        if (format.Contains("错误") || format.Contains("失败"))
+        if (format.Contains("错误") || format.Contains("失败") || format.Contains("error", StringComparison.OrdinalIgnoreCase) || format.Contains("fail", StringComparison.OrdinalIgnoreCase) || format.Contains("exception", StringComparison.OrdinalIgnoreCase))
             _eventProvider?.WriteErrorEvent(nameof(FrameworkManager), msg);
         else
             _eventProvider?.WriteInfoEvent(nameof(FrameworkManager), msg);

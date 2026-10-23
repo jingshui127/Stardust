@@ -5,6 +5,7 @@ using NewLife.Remoting.Extensions;
 using NewLife.Remoting.Services;
 using NewLife.Web;
 using Stardust.Data;
+using Stardust.Models;
 using Stardust.Server.Models;
 using Stardust.Server.Services;
 
@@ -30,7 +31,7 @@ public class OAuthController(ITokenService tokenService, AppTokenService appToke
             // 密码模式
             if (model.grant_type == "password")
             {
-                var app = appTokenService.Authorize(model.UserName, model.Password, setting.AppAutoRegister, ip);
+                var app = appTokenService.Authorize(model.UserName, model.Password, setting.AppAutoRegister, ip, clientId);
 
                 // 更新应用信息
                 app.LastLogin = DateTime.Now;
@@ -43,7 +44,8 @@ public class OAuthController(ITokenService tokenService, AppTokenService appToke
 
                 app.WriteHistory("Authorize", true, model.UserName, olt?.Version, ip, clientId);
 
-                return tokenModel;
+                // 收敛窗口/开放模式：随令牌下发密钥，供客户端保存后自动收敛
+                return WithSecret(tokenModel, app);
             }
             // 刷新令牌
             else if (model.grant_type == "refresh_token")
@@ -54,7 +56,7 @@ public class OAuthController(ITokenService tokenService, AppTokenService appToke
                 var app = App.FindByName(jwt?.Subject);
                 if (app == null || !app.Enable)
                 {
-                    ex ??= new ApiException(ApiCode.Unauthorized, $"无效应用[{jwt.Subject}]");
+                    ex ??= new ApiException(ApiCode.Unauthorized, L.T("Invalid application [{0}]", jwt.Subject));
                 }
 
                 if (clientId.IsNullOrEmpty()) clientId = jwt.Id;
@@ -75,7 +77,7 @@ public class OAuthController(ITokenService tokenService, AppTokenService appToke
             }
             else
             {
-                throw new NotSupportedException($"未支持 grant_type={model.grant_type}");
+                throw new NotSupportedException(L.T("Unsupported grant_type={0}", model.grant_type));
             }
         }
         catch (Exception ex)
@@ -85,6 +87,31 @@ public class OAuthController(ITokenService tokenService, AppTokenService appToke
 
             throw;
         }
+    }
+
+    /// <summary>按重注册模式放行时，随令牌下发应用密钥，供客户端保存后自动收敛。其余情况原样返回</summary>
+    /// <param name="token">令牌</param>
+    /// <param name="app">应用</param>
+    /// <returns>携带密钥的扩展令牌</returns>
+    private static IToken WithSecret(IToken token, App app)
+    {
+        if (app.ReRegister is not (ReRegisterModes.Auto or ReRegisterModes.Open)) return token;
+        if (app.Secret.IsNullOrEmpty()) return token;
+
+        var model = new AppTokenModel
+        {
+            AccessToken = token.AccessToken,
+            ExpireIn = token.ExpireIn,
+            RefreshToken = token.RefreshToken,
+            Secret = app.Secret,
+        };
+        if (token is NewLife.Web.TokenModel tm)
+        {
+            model.TokenType = tm.TokenType;
+            model.Scope = tm.Scope;
+        }
+
+        return model;
     }
 
     /// <summary>获取当前令牌对应的应用信息</summary>

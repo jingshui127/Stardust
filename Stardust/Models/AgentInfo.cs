@@ -62,7 +62,7 @@ public class AgentInfo
         var p = Process.GetCurrentProcess();
         var asmx = AssemblyX.Entry;
         var fileName = p.MainModule?.FileName;
-        var args = fileName.IsNullOrEmpty() ? null : Environment.CommandLine.TrimStart(Path.ChangeExtension(fileName, ".dll")).Trim();
+        var args = fileName.IsNullOrEmpty() ? null : Environment.CommandLine.TrimPrefix(Path.ChangeExtension(fileName, ".dll")).Trim();
         //var ip = GetIps();
 
         var inf = new AgentInfo
@@ -108,47 +108,109 @@ public class AgentInfo
         }
     }
 
-    private static String? _dns;
-    /// <summary>获取网关IP地址和MAC</summary>
+    private static String? _dnsList;
+    /// <summary>获取DNS服务器地址列表。逗号分隔多个地址</summary>
+    /// <remarks>
+    /// Linux 的 systemd-resolved 会把 /etc/resolv.conf 指向 127.0.0.53 本地存根，直接读取只能拿到存根地址。
+    /// 这里优先读取 /run/systemd/resolve/resolv.conf，拿到网关与公共DNS等真实上游；结果为空或仍是本地地址时不缓存，等网络就绪后重新获取。
+    /// </remarks>
+    /// <returns></returns>
+    public static String? GetDnsList()
+    {
+        if (_dnsList != null) return _dnsList;
+
+        var dns = GetDnsCore();
+
+        // 本地存根地址和空值不做缓存，等待网络就绪后重新获取
+        var isLocal = false;
+        if (!dns.IsNullOrEmpty())
+        {
+            foreach (var item in dns.Split(','))
+            {
+                if (IPAddress.TryParse(item, out var ip) && ip.IsLocal()) { isLocal = true; break; }
+            }
+        }
+        if (!dns.IsNullOrEmpty() && !isLocal) _dnsList = dns;
+
+        return dns;
+    }
+
+    /// <summary>获取DNS服务器地址。单个地址，多个时取第一个</summary>
     /// <returns></returns>
     public static String? GetDns()
     {
-        if (_dns != null) return _dns;
+        var dns = GetDnsList();
+        if (dns.IsNullOrEmpty()) return dns;
+
+        var p = dns.IndexOf(',');
+        return p > 0 ? dns[..p] : dns;
+    }
+
+    private static String? GetDnsCore()
+    {
         try
         {
+            // systemd-resolved 环境中，/etc/resolv.conf 只是本地存根，真实上游在 /run/systemd/resolve/resolv.conf
+            if (Runtime.Linux)
+            {
+                var file = "/run/systemd/resolve/resolv.conf";
+                if (File.Exists(file))
+                {
+                    var list = ParseDnsServers(File.ReadAllText(file));
+                    if (list.Length > 0) return list.Join(",");
+                }
+            }
+
             var dns = NetworkInterface.GetAllNetworkInterfaces()
                 .SelectMany(e => e.GetIPProperties().DnsAddresses)
-                .FirstOrDefault(e => e.AddressFamily == AddressFamily.InterNetwork);
-            if (dns != null) return _dns = dns.ToString();
+                .Where(e => e.AddressFamily == AddressFamily.InterNetwork)
+                .Select(e => e + "")
+                .Distinct()
+                .ToArray();
+            if (dns.Length > 0) return dns.Join(",");
 
             // 如果没有DNS地址，在Linux下直接读取/etc/resolv.conf文件
-            if (dns == null && Runtime.Linux)
+            if (Runtime.Linux)
             {
                 var file = "/etc/resolv.conf";
                 if (File.Exists(file))
                 {
-                    // 读取文件所有行，清空前后空白后，找到第一个nameserver开头的行，截取IP地址数据，去掉#结尾的注释
-                    var lines = File.ReadAllLines(file);
-                    foreach (var item in lines)
-                    {
-                        var line = item.Trim();
-                        if (line.IsNullOrEmpty() || !line.StartsWith("nameserver")) continue;
-
-                        line = line["nameserver".Length..].Trim();
-                        var p = line.IndexOf('#');
-                        if (p > 0) line = line[..p].Trim(); // 去掉#结尾的注释
-
-                        return _dns = line;
-                    }
+                    var list = ParseDnsServers(File.ReadAllText(file));
+                    if (list.Length > 0) return list.Join(",");
                 }
             }
 
-            return _dns = String.Empty;
+            return String.Empty;
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>解析 resolv.conf 内容中的DNS服务器地址，剔除本地存根与重复项</summary>
+    /// <param name="content">文件内容</param>
+    /// <returns>地址数组</returns>
+    public static String[] ParseDnsServers(String content)
+    {
+        var list = new List<String>();
+        foreach (var item in content.Split('\n'))
+        {
+            var line = item.Trim();
+            if (line.IsNullOrEmpty() || !line.StartsWith("nameserver")) continue;
+
+            line = line["nameserver".Length..].Trim();
+            var p = line.IndexOf('#');
+            if (p > 0) line = line[..p].Trim(); // 去掉#结尾的注释
+
+            // 本地存根地址（如127.0.0.53）不是真实上游，不参与上报
+            if (line.IsNullOrEmpty()) continue;
+            if (IPAddress.TryParse(line, out var ip) && ip.IsLocal()) continue;
+
+            if (!list.Contains(line)) list.Add(line);
+        }
+
+        return list.ToArray();
     }
 
     private static String? _gateway;
@@ -193,13 +255,13 @@ public class AgentInfo
             {
                 if (GetIpNetTable(buffer, ref size, false) == 0)
                 {
-                    var entrySize = Marshal.SizeOf(typeof(MibIpNetRow));
+                    var entrySize = MarshalHelper.SizeOf<MibIpNetRow>();
                     var count = Marshal.ReadInt32(buffer);
                     var currentBuffer = IntPtr.Add(buffer, 4);
 
                     for (var i = 0; i < count; i++)
                     {
-                        var row = (MibIpNetRow)Marshal.PtrToStructure(currentBuffer, typeof(MibIpNetRow))!;
+                        var row = MarshalHelper.PtrToStructure<MibIpNetRow>(currentBuffer);
                         var ip = new IPAddress(row.Addr).ToString();
                         var mac = String.Join("-", row.PhysAddr.Take(row.PhysAddrLen).Select(b => b.ToString("X2")));
 
@@ -275,14 +337,14 @@ public class AgentInfo
     {
         _ips = null;
         _gateway = null;
-        _dns = null;
+        _dnsList = null;
     }
 
     private static void NetworkChange_NetworkAddressChanged(Object? sender, EventArgs e)
     {
         _ips = null;
         _gateway = null;
-        _dns = null;
+        _dnsList = null;
     }
     #endregion
 }

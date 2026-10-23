@@ -55,7 +55,7 @@ public class NetRuntime
     /// <returns></returns>
     public String Download(String fileName, String? baseUrl = null)
     {
-        WriteLog("下载 {0}", fileName);
+        WriteLog("Downloading {0}", fileName);
 
         var fullFile = fileName;
         if (!String.IsNullOrEmpty(CachePath)) fullFile = Path.Combine(CachePath, fileName);
@@ -111,7 +111,7 @@ public class NetRuntime
         if (fi == null || !fi.Exists)
         {
             var url = $"{baseUrl}/{fileName}";
-            WriteLog("正在下载：{0}", url);
+            WriteLog("Downloading: {0}", url);
 
             var dir = Path.GetDirectoryName(fullFile);
             if (!String.IsNullOrEmpty(dir) && !Directory.Exists(dir)) Directory.CreateDirectory(dir);
@@ -133,7 +133,7 @@ public class NetRuntime
             if (hash != null && !String.IsNullOrEmpty(hash))
                 hash2 = hash.Length > 32 ? GetSHA512(fullFile) : GetMD5(fullFile);
 
-            WriteLog("哈希: {0}", hash2);
+            WriteLog("Hash: {0}", hash2);
 
             //// 在windows系统上，下载完成以后，等待一会再安装，避免文件被占用（可能是安全扫描），提高安装成功率
             //if (Runtime.Windows) Thread.Sleep(15_000);
@@ -155,10 +155,12 @@ public class NetRuntime
         if (IsWindows && String.IsNullOrEmpty(arg)) arg = "/passive /promptrestart";
         if (!Silent) arg = null;
 
-        WriteLog("正在安装：{0} {1}", fullFile, arg);
+        WriteLog("Installing: {0} {1}", fullFile, arg);
 
         if (IsWindows)
             return InstallOnWindows(fullFile, arg);
+        else if (Runtime.OSX)
+            return InstallOnOSX(fullFile, arg);
         else
             return InstallOnLinux(fullFile, arg);
     }
@@ -169,15 +171,15 @@ public class NetRuntime
         if (p.WaitForExit(600_000))
         {
             if (p.ExitCode == 0)
-                WriteLog("安装完成！");
+                WriteLog("Installation completed.");
             else
-                WriteLog("安装失败！ExitCode={0}", p.ExitCode);
+                WriteLog("Installation failed: ExitCode={0}", p.ExitCode);
             Environment.ExitCode = p.ExitCode;
             return p.ExitCode == 0;
         }
         else
         {
-            WriteLog("安装超时！");
+            WriteLog("Installation timed out.");
             Environment.ExitCode = 400;
             return false;
         }
@@ -191,7 +193,7 @@ public class NetRuntime
         if (!Directory.Exists(target)) Directory.CreateDirectory(target);
 
         // 解压缩
-        WriteLog($"解压缩[{fullFile}]到[{target}]");
+        WriteLog(L.TLog("Extracting [{0}] to [{1}]", fullFile, target));
         Process.Start(new ProcessStartInfo("tar", $"-xzf {fullFile} -C {target}") { UseShellExecute = true });
 
         // 建立链接
@@ -201,13 +203,41 @@ public class NetRuntime
 
         if (!File.Exists(link))
         {
-            WriteLog($"创建[{target}/dotnet]的软连接到[{link}]");
+            WriteLog(L.TLog("Created a symbolic link from [{0}/dotnet] to [{1}]", target, link));
             Process.Start(new ProcessStartInfo("ln", $"{target}/dotnet {link} -s") { UseShellExecute = true });
         }
 
-        WriteLog("安装完成！");
+        WriteLog("Installation completed.");
 
         return true;
+    }
+
+    Boolean InstallOnOSX(String fullFile, String? arg)
+    {
+        // macOS 官方安装位置
+        var target = "/usr/local/share/dotnet";
+        if (!Directory.Exists(target)) Directory.CreateDirectory(target);
+
+        WriteLog(L.TLog("Extracting [{0}] to [{1}]", fullFile, target));
+        Process.Start(new ProcessStartInfo("tar", $"-xzf {fullFile} -C {target}") { UseShellExecute = true })?.WaitForExit(600_000);
+
+        // 建立链接
+        var link = "/usr/local/bin/dotnet";
+        if (Force && File.Exists(link)) File.Delete(link);
+
+        if (!File.Exists(link) && File.Exists($"{target}/dotnet"))
+        {
+            WriteLog(L.TLog("Created a symbolic link from [{0}/dotnet] to [{1}]", target, link));
+            Process.Start(new ProcessStartInfo("ln", $"-s {target}/dotnet {link}") { UseShellExecute = true })?.WaitForExit(5_000);
+        }
+
+        var rs = File.Exists($"{target}/dotnet");
+        if (rs)
+            WriteLog("Installation completed.");
+        else
+            WriteLog("Installation failed: {0}/dotnet was not found", target);
+
+        return rs;
     }
 
     static Version GetLast(IList<VerInfo> vers, String? prefix = null, String? suffix = null)
@@ -252,7 +282,7 @@ public class NetRuntime
         var target = new Version("4.0");
         if (!Force && ver >= target)
         {
-            WriteLog("已安装最新版 v{0}", ver);
+            WriteLog("The latest version v{0} is already installed", ver);
             return false;
         }
 
@@ -296,7 +326,7 @@ public class NetRuntime
         var target = new Version("4.5");
         if (!Force && ver >= target)
         {
-            WriteLog("已安装最新版 v{0}", ver);
+            WriteLog("The latest version v{0} is already installed", ver);
             return false;
         }
 
@@ -323,7 +353,7 @@ public class NetRuntime
         var target = osVer.Major >= 10 ? new Version("4.8.1") : new Version("4.8");
         if (!Force && ver >= target)
         {
-            WriteLog("已安装最新版 v{0}", ver);
+            WriteLog("The latest version v{0} is already installed", ver);
             return false;
         }
 
@@ -379,7 +409,7 @@ public class NetRuntime
         var targetVer = new Version(target);
         if (!Force && ver >= targetVer)
         {
-            WriteLog("已安装最新版 v{0}", ver);
+            WriteLog("The latest version v{0} is already installed", ver);
             return false;
         }
 
@@ -464,7 +494,7 @@ public class NetRuntime
         var targetVer = new Version(target);
         if (!Force && ver >= targetVer)
         {
-            WriteLog("已安装最新版 v{0}", ver);
+            WriteLog("The latest version v{0} is already installed", ver);
             return;
         }
 
@@ -486,6 +516,38 @@ public class NetRuntime
                 Install($"dotnet-runtime-{target}-linux-{arch}.tar.gz");
                 break;
         }
+#endif
+    }
+
+    /// <summary>在macOS上安装.NET运行时</summary>
+    /// <param name="target">目标版本。包括子版本，如6.0.15</param>
+    /// <param name="kind">安装类型。如aspnet</param>
+    public void InstallNetOnOSX(String target, String? kind = null)
+    {
+        var vers = GetNetCore();
+
+        var suffix = "";
+        if (!String.IsNullOrEmpty(kind)) suffix = "-" + kind;
+        var ver = GetLast(vers, "v" + target.Substring(0, 3), suffix);
+
+        // 目标版本
+        var targetVer = new Version(target);
+        if (!Force && ver >= targetVer)
+        {
+            WriteLog("The latest version v{0} is already installed", ver);
+            return;
+        }
+
+#if NETSTANDARD || NETCOREAPP
+        var arch = RuntimeInformation.ProcessArchitecture.ToString().ToLower();
+
+        var file = kind switch
+        {
+            "aspnet" => $"aspnetcore-runtime-{target}-osx-{arch}.tar.gz",
+            _ => $"dotnet-runtime-{target}-osx-{arch}.tar.gz",
+        };
+
+        Install(file, "/dotnet/Runtime");
 #endif
     }
 
@@ -536,7 +598,7 @@ public class NetRuntime
             }
             if (max == null || max < verLib)
             {
-                WriteLog("更新libstdc++，原版本{0}，更新到{1}", max, verLib);
+                WriteLog("Updating libstdc++ from {0} to {1}", max, verLib);
 
                 var file = Download($"libstdcpp.{verLib}.so", null);
                 if (!String.IsNullOrEmpty(file) && File.Exists(file))
@@ -721,6 +783,8 @@ public class NetRuntime
             if (String.IsNullOrEmpty(dir)) return list;
             dir += "\\dotnet\\shared";
         }
+        else if (Runtime.OSX)
+            dir = "/usr/local/share/dotnet/shared";
         else
             dir = "/usr/share/dotnet/shared";
 
@@ -897,7 +961,7 @@ public class NetRuntime
     /// <returns></returns>
     public Boolean InstallCert()
     {
-        WriteLog("准备安装微软根证书");
+        WriteLog("Preparing to install the Microsoft root certificate");
 
         // 释放文件
         var asm = Assembly.GetExecutingAssembly();
@@ -952,12 +1016,12 @@ public class NetRuntime
     /// <param name="args"></param>
     public void WriteLog(String format, params Object?[] args)
     {
-        Log?.Info($"[NetRuntime]{format}", args);
+        Log?.InfoPrefixed("[NetRuntime]", format, args);
 
         var msg = (args == null || args.Length == 0) ? format : String.Format(format, args);
         DefaultSpan.Current?.AppendTag(msg);
 
-        if (format.Contains("错误") || format.Contains("失败"))
+        if (format.Contains("错误") || format.Contains("失败") || format.Contains("error", StringComparison.OrdinalIgnoreCase) || format.Contains("fail", StringComparison.OrdinalIgnoreCase) || format.Contains("exception", StringComparison.OrdinalIgnoreCase))
             EventProvider?.WriteErrorEvent(nameof(NetRuntime), msg);
         else
             EventProvider?.WriteInfoEvent(nameof(NetRuntime), msg);

@@ -57,6 +57,7 @@ public class Startup
             FlowPeriod = set.MonitorFlowPeriod,
             BatchPeriod = set.MonitorBatchPeriod,
             SavePeriod = set.MonitorSavePeriod,
+            PatrolPeriod = set.MonitorPatrolPeriod,
         };
         services.AddSingleton<ITraceStatService>(traceService);
         var appStatService = new AppDayStatService(tracer) { BatchPeriod = set.MonitorBatchPeriod };
@@ -69,14 +70,17 @@ public class Startup
             traceService.FlowPeriod = set.MonitorFlowPeriod;
             traceService.BatchPeriod = set.MonitorBatchPeriod;
             traceService.SavePeriod = set.MonitorSavePeriod;
+            traceService.PatrolPeriod = set.MonitorPatrolPeriod;
             appStatService.BatchPeriod = set.MonitorBatchPeriod;
         };
 
         IpResolver.Register();
 
-        // 当文件提供或文件拉取任一功能开启时，启用文件存储
-        if (set.FileStorageProvide || set.FileStorageFetch)
-            services.AddCubeFileStorage("Star");
+        // 文件存储：IFileStorage 必须始终注册，因为 CubeController 的构造函数始终依赖它。
+        // 若仅在“提供/拉取”开启时才注册，一旦两个开关都关闭（如运行配置将 FileStorageProvide 设为 false），
+        // CubeController 将无法激活并抛出 InvalidOperationException。
+        // 后台文件存储服务（事件总线订阅/扫描）仍仅在任一功能开启时启动，避免无谓开销。
+        services.AddCubeFileStorage("Star");
 
         // DDNS服务 - 必须在 NodeService 之前注册，因为 NodeService 依赖 DnsService
         services.AddSingleton<IDnsProvider, AliyunDnsProvider>();
@@ -188,7 +192,7 @@ public class Startup
 
             if (!target.IsNullOrEmpty())
             {
-                XTrace.WriteLine("兼容旧配置，[StardustData]使用[{0}]的连接配置，建议直接设置[StardustData]的连接字符串", target);
+                XTrace.WriteLine("Legacy configuration compatibility: [StardustData] uses the connection settings from [{0}]; set the [StardustData] connection string directly instead.", target);
                 var dal = DAL.Create(target);
                 DAL.AddConnStr("StardustData", dal.ConnStr, null, dal.DbType + "");
             }
@@ -205,6 +209,9 @@ public class Startup
 
         // 检查数据库表结构，阻塞主线程。在数据库检查完成之前，不提供对外服务，也不执行IHostedService
         EntityFactory.InitAll();
+
+        // 多语言。配置了固定语言时全进程生效，否则按请求语言识别
+        app.UseStardustLocalization();
 
         if (env.IsDevelopment())
         {
@@ -261,12 +268,26 @@ public class Startup
         if (app is IHost host)
             NewLife.Model.Host.RegisterExit(() => host.StopAsync().Wait());
 
+        // 优雅停机：把统计服务的延迟队列缓冲落盘，缩小重启数据缺口
+        var lifetime = app.ApplicationServices.GetService<IHostApplicationLifetime>();
+        lifetime?.ApplicationStopping.Register(() =>
+        {
+            try
+            {
+                app.ApplicationServices.GetService<ITraceStatService>()?.Flush();
+            }
+            catch (Exception ex)
+            {
+                XTrace.WriteException(ex);
+            }
+        });
+
         app.UseEndpoints(endpoints =>
         {
             endpoints.MapControllers();
         });
 
-        XTrace.WriteLine("StarServer初始化完成");
+        XTrace.WriteLine("StarServer initialization completed");
 
         // 取得StarWeb地址
         Task.Run(() => ResolveWebUrl(app.ApplicationServices));
@@ -313,16 +334,16 @@ public class Startup
         var tables = dal.Tables;
         if (tables != null && !tables.Any(e => e.TableName.EqualIgnoreCase("StarApp")))
         {
-            XTrace.WriteLine("未发现Star应用新表 StarApp");
+            XTrace.WriteLine("The new StarApp table was not found");
 
             // 验证表名和部分字段名，避免误改其它表
             var dt = tables.FirstOrDefault(e => e.TableName.EqualIgnoreCase("App"));
             if (dt != null && dt.Columns.Any(e => e.ColumnName.EqualIgnoreCase("AutoActive")))
             {
-                XTrace.WriteLine("发现Star应用旧表 App ，准备重命名");
+                XTrace.WriteLine("Found legacy Star application table App; preparing to rename");
 
                 var rs = dal.Execute($"Alter Table App Rename To StarApp");
-                XTrace.WriteLine("重命名结果：{0}", rs);
+                XTrace.WriteLine("Rename result: {0}", rs);
             }
         }
 

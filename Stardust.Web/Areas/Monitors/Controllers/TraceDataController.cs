@@ -12,6 +12,7 @@ using static Stardust.Data.Monitors.TraceData;
 
 namespace Stardust.Web.Areas.Monitors.Controllers;
 
+/// <summary>追踪数据。按应用与埋点项聚合的调用统计，支撑调用链可视化与性能分析</summary>
 [Menu(0, false)]
 [MonitorsArea]
 public class TraceDataController : ReadOnlyEntityController<TraceData>
@@ -132,7 +133,7 @@ public class TraceDataController : ReadOnlyEntityController<TraceData>
         var start = DateTime.Today.AddDays(-30);
         var end = DateTime.Today;
         var list = SampleData.Search(id, "", null, start, end, new PageParameter { PageSize = 1000 });
-        if (list.Count == 0) throw new InvalidDataException("找不到采样数据");
+        if (list.Count == 0) throw new InvalidDataException(L.T("Sample data not found."));
 
         //return RedirectToAction("Index", "SampleData", new { traceId = list[0].TraceId });
         return Redirect($"/trace?id={list[0].TraceId}");

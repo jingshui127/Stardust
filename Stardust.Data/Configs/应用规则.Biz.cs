@@ -32,14 +32,14 @@ namespace Stardust.Data.Configs
             // InitData一般用于当数据表没有数据时添加一些默认数据，该实体类的任何第一次数据库操作都会触发该方法，默认异步调用
             if (Meta.Count > 0) return;
 
-            if (XTrace.Debug) XTrace.WriteLine("开始初始化AppRule[应用规则]数据……");
+            if (XTrace.Debug) XTrace.WriteLine("Initializing AppRule data...");
 
             var entity = new AppRule
             {
                 Rule = "IP=*",
                 Result = "Scope=dev",
                 Priority = -1,
-                Remark = "全局默认开发",
+                Remark = L.T("Global default development"),
             };
             entity.Insert();
 
@@ -48,7 +48,7 @@ namespace Stardust.Data.Configs
                 Rule = "IP=172.*,10.*",
                 Result = "Scope=pro",
                 Priority = 10,
-                Remark = "正式环境",
+                Remark = L.T("Production environment"),
             };
             entity.Insert();
 
@@ -66,11 +66,11 @@ namespace Stardust.Data.Configs
                 Rule = "LocalIP=127.*,::1,192.*",
                 Result = "Scope=dev",
                 Priority = 20,
-                Remark = "本机开发",
+                Remark = L.T("Local development"),
             };
             entity.Insert();
 
-            if (XTrace.Debug) XTrace.WriteLine("完成初始化AppRule[应用规则]数据！");
+            if (XTrace.Debug) XTrace.WriteLine("AppRule data initialization completed.");
         }
         #endregion
 
@@ -110,10 +110,10 @@ namespace Stardust.Data.Configs
 
         #region 业务操作
         /// <summary>计算作用域</summary>
-        /// <param name="appid"></param>
+        /// <param name="appid">应用编号</param>
         /// <param name="ip">远程IP地址</param>
         /// <param name="localIp">本地IP地址</param>
-        /// <returns></returns>
+        /// <returns>匹配到的作用域，未匹配时返回 null</returns>
         public static String CheckScope(Int32 appid, String ip, String localIp)
         {
             if (ip.IsNullOrEmpty() && localIp.IsNullOrEmpty()) return null;
@@ -138,7 +138,7 @@ namespace Stardust.Data.Configs
         /// <summary>匹配规则</summary>
         /// <param name="ip">远程IP地址</param>
         /// <param name="localIp">本地IP地址</param>
-        /// <returns></returns>
+        /// <returns>是否匹配成功</returns>
         public Boolean Match(String ip, String localIp)
         {
             var dic = Rule.SplitAsDictionary("=", ";");

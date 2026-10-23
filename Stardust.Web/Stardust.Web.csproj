@@ -3,11 +3,11 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>StarWeb</AssemblyName>
-    <AssemblyTitle>科控物联管理平台</AssemblyTitle>
-    <Description>科控物联分布式服务平台管理界面。提供节点管理、应用管理、配置中心、注册中心、监控中心、发布中心、调用链追踪、性能分析与日志查询等统一管理入口。</Description>
-    <Company>科控物联</Company>
-    <Copyright>©2002-2026 TC</Copyright>
-    <VersionPrefix>3.10</VersionPrefix>
+    <AssemblyTitle>Stardust management portal</AssemblyTitle>
+    <Description>Management portal for the Stardust distributed service platform. A visual management system built on NewLife.Cube, providing unified entry points for node management, application management, configuration center, registry, monitoring center, release center, call chain tracing, performance analysis, and log queries.</Description>
+    <Company>新生命开发团队</Company>
+    <Copyright>©2002-2026 NewLife</Copyright>
+    <VersionPrefix>3.7</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
     <FileVersion>$(Version)</FileVersion>
@@ -44,13 +44,14 @@
     <Compile Include="..\Stardust.Server\Services\DnsProviderFactory.cs" Link="Services\DnsProviderFactory.cs" />
     <Compile Include="..\Stardust.Server\Services\DnsService.cs" Link="Services\DnsService.cs" />
     <Compile Include="..\Stardust.Server\Setting.cs" Link="Setting.cs" />
+    <Compile Include="..\Stardust.Server\Localization\StardustLocalization.cs" Link="Localization\StardustLocalization.cs" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.Cube.Core" Version="6.15.2026.1002-beta1649" />
-    <PackageReference Include="NewLife.IP" Version="2.5.2026.804" />
-    <PackageReference Include="NewLife.Redis" Version="6.6.2026.901" />
-    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.9.2026.901" />
+    <PackageReference Include="NewLife.Cube.Core" Version="6.15.2026.1018-beta1727" />
+    <PackageReference Include="NewLife.IP" Version="2.5.2026.1019-beta1510" />
+    <PackageReference Include="NewLife.Redis" Version="6.6.2026.1019-beta1511" />
+    <PackageReference Include="NewLife.Remoting.Extensions" Version="3.9.2026.1019-beta1013" />
   </ItemGroup>
 
   <ItemGroup>
@@ -78,6 +79,11 @@
       <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
   </ItemGroup>
 
 </Project>

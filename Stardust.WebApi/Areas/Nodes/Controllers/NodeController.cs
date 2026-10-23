@@ -74,7 +74,7 @@ public class NodeController : NodesEntityController<Node>
             var old = Node.FindByID(entity.ID);
             if (old != null && old.Domains != entity.Domains)
             {
-                entity.WriteHistory("修改域名", true, $"域名变更：{old.Domains} -> {entity.Domains}", ManageProvider.UserHost);
+                entity.WriteHistory(L.T("Domain changed"), true, L.T("Domains changed: {0} -> {1}", old.Domains, entity.Domains), ManageProvider.UserHost);
             }
         }
 
@@ -238,7 +238,7 @@ public class NodeController : NodesEntityController<Node>
     public async Task<ActionResult> RefreshDns(Int32 id)
     {
         var node = FindByID(id);
-        if (node == null) throw new InvalidOperationException("节点不存在");
+        if (node == null) throw new InvalidOperationException(L.T("Node does not exist."));
 
         await _dnsService.RefreshNodeDomainsAsync(node);
 

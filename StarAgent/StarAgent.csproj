@@ -2,12 +2,12 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFrameworks>net45;net461;netcoreapp3.1;net5.0;net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
-    <AssemblyTitle>科控物联进程守护</AssemblyTitle>
-    <Description>科控物联进程守护代理。部署于应用服务器或边缘节点，提供进程守护、远程发布部署、性能监控采集、日志与指标上报，支持 Windows 服务、Linux systemd 与 IoT 边缘环境。</Description>
-    <Company>科控物联</Company>
-    <Copyright>©2002-2026 TC</Copyright>
-    <VersionPrefix>3.10</VersionPrefix>
+    <TargetFrameworks>net45;net461;net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
+    <AssemblyTitle>Stardust agent</AssemblyTitle>
+    <Description>Node guardian agent for Stardust. Deployed on every application server or edge node, providing process supervision, remote deployment, performance metrics collection (CPU/memory/disk/network/GPU), log and metric reporting, and supporting Windows services, Linux systemd, and IoT edge environments.</Description>
+    <Company>新生命开发团队</Company>
+    <Copyright>©2002-2026 NewLife</Copyright>
+    <VersionPrefix>3.7</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
     <FileVersion>$(Version)</FileVersion>
@@ -31,7 +31,6 @@
     <!--<GarbageCollectionAdaptationMode>1</GarbageCollectionAdaptationMode>-->
     <!--<PublishAot>true</PublishAot>-->
     <!--<OptimizationPreference>Size</OptimizationPreference>-->
-    <!--<InvariantGlobalization>true</InvariantGlobalization>-->
     <!--<StackTraceSupport>false</StackTraceSupport>-->
   </PropertyGroup>
 
@@ -42,19 +41,18 @@
   </ItemGroup>
   
   <ItemGroup>
-    <RuntimeHostConfigurationOption Include="System.Globalization.Invariant" Value="true" />
-  </ItemGroup>
-
-  <ItemGroup>
     <EmbeddedResource Include="WebPanel\wwwroot\**" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.Agent" Version="10.17.2026.801" />
+    <PackageReference Include="NewLife.Agent" Version="10.17.2026.1021-beta0235" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Stardust\Stardust.csproj" />
   </ItemGroup>
-
+  <ItemGroup>
+    <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
+  </ItemGroup>
 </Project>

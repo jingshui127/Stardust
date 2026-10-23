@@ -18,14 +18,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.9.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.11.0" />
     <PackageReference Include="Moq" Version="4.21.0" />
     <PackageReference Include="xunit" Version="2.9.3" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0">
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.1">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
-    <PackageReference Include="coverlet.collector" Version="10.0.1">
+    <PackageReference Include="coverlet.collector" Version="10.1.0">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
@@ -34,6 +34,39 @@
   <ItemGroup>
     <ProjectReference Include="..\Stardust\Stardust.csproj" />
     <ProjectReference Include="..\Stardust.Extensions\Stardust.Extensions.csproj" />
+    <ProjectReference Include="..\StarAgent.Mobile\StarAgent.Mobile.csproj" />
+    <!-- ServiceManager/ServiceController 由 StarAgent 工程编译，引用后可直接测试应用服务管理 -->
+    <ProjectReference Include="..\StarAgent\StarAgent.csproj" />
+  </ItemGroup>
+
+  <!-- StarAgent 已作为工程引用，WebBindHelper 直接使用编译后的类型，无需再链接源码 -->
+
+  <!-- AgentExpansion 为插件工程，链接其局域网地址解析源码直接测试 -->
+  <ItemGroup>
+    <Compile Include="..\Plugins\AgentExpansion\LanScan.cs" Link="AgentExpansion\LanScan.cs" />
+  </ItemGroup>
+
+  <!-- 词表一致性测试直接读取各组件 Locales 词表 -->
+  <ItemGroup>
+    <Content Include="..\Stardust\Locales\*.yml" Link="Locales\Stardust\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Stardust.Extensions\Locales\*.yml" Link="Locales\Stardust.Extensions\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Stardust.Server\Locales\*.yml" Link="Locales\Stardust.Server\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Stardust.Web\Locales\*.yml" Link="Locales\Stardust.Web\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Stardust.WebApi\Locales\*.yml" Link="Locales\Stardust.WebApi\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Stardust.Data\Locales\*.yml" Link="Locales\Stardust.Data\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\StarAgent\Locales\*.yml" Link="Locales\StarAgent\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\StarAgent.Mobile\Locales\*.yml" Link="Locales\StarAgent.Mobile\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\StarGateway\Locales\*.yml" Link="Locales\StarGateway\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\DeployAgent\Locales\*.yml" Link="Locales\DeployAgent\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Plugins\AgentExpansion\Locales\*.yml" Link="Locales\AgentExpansion\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\Plugins\NetworkDetect\Locales\*.yml" Link="Locales\NetworkDetect\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- 面板前端词表测试直接读取 StarAgent 的 wwwroot 资源 -->
+  <ItemGroup>
+    <Content Include="..\StarAgent\WebPanel\wwwroot\index.html" Link="WebPanel\index.html" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\StarAgent\WebPanel\wwwroot\i18n.js" Link="WebPanel\i18n.js" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\StarAgent\WebPanel\wwwroot\i18n\*.json" Link="WebPanel\i18n\%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

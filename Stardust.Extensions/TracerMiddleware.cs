@@ -37,6 +37,14 @@ public class TracerMiddleware(RequestDelegate next)
     /// <summary>放行的请求路径规则。支持*模糊匹配，命中的路径保留完整URL作埋点名称，且不参与自动学习，如 /Admin/*、/v1/user/*。可直接追加</summary>
     public static IList<String> AllowPaths { get; set; } = [];
 
+    /// <summary>自定义抛弃规则。返回true时丢弃该请求的埋点；为空时采用默认规则：未命中路由终结点的404响应</summary>
+    /// <remarks>
+    /// <para>默认规则针对扫描探测（如 /wp-login.php、/.env），这些请求不会命中任何路由终结点，埋点名又多又没有意义。
+    /// 业务接口主动返回的404（如查询的资源不存在）会命中终结点，属于正常业务行为，仍然保留埋点。</para>
+    /// <para>设置本属性后完全接管默认规则，需要保留默认行为时请在委托内自行包含。</para>
+    /// </remarks>
+    public static Func<HttpContext, Boolean>? ShouldAbandon { get; set; }
+
     /// <summary>调用</summary>
     /// <param name="ctx"></param>
     /// <returns></returns>
@@ -62,9 +70,10 @@ public class TracerMiddleware(RequestDelegate next)
                 // 请求主体作为强制采样的数据标签，便于分析链路
                 var req = ctx.Request;
 
-                span = Tracer.NewSpan(action);
-                span.Tag = $"{ctx.GetUserHost()} {req.Method} {req.GetRawUrl()}";
-                span.Detach(req.Headers);
+                // 服务端片段需要继承上游链路。OpenTelemetry 的活动一旦启动就无法再指定父级，
+                // 必须由 NewServerSpan 在创建时传入上游上下文，不能沿用"先建后 Detach"的写法
+                span = Tracer.NewServerSpan(action, req.Headers);
+                span!.Tag = $"{ctx.GetUserHost()} {req.Method} {req.GetRawUrl()}";
                 span.Value = req.ContentLength ?? 0;
                 if (span is DefaultSpan ds && ds.TraceFlag > 0)
                 {
@@ -91,7 +100,7 @@ public class TracerMiddleware(RequestDelegate next)
                         }
                         catch (Exception ex)
                         {
-                            XTrace.Log.Error("[{0}]读取请求主体失败：{1}", action, ex.Message);
+                            XTrace.Log.Error("[{0}] Failed to read the request body: {1}", action, ex.Message);
                         }
                         finally
                         {
@@ -137,7 +146,12 @@ public class TracerMiddleware(RequestDelegate next)
                 var res = ctx.Response;
                 span.Value += res.ContentLength ?? 0;
                 var code = res.StatusCode;
-                if (code == 400 || code > 404)
+
+                // 抛弃垃圾埋点。默认只丢弃未命中路由终结点的404，即路径不存在的扫描探测，避免TraceItem过多。
+                // 业务接口主动返回的404（如查询的资源不存在）会命中终结点，属于正常业务行为，必须保留埋点
+                if (ShouldAbandon?.Invoke(ctx) ?? (code == 404 && ctx.GetEndpoint() == null))
+                    span.Abandon();
+                else if (code == 400 || code > 404)
                     span.SetError(new HttpRequestException($"Http Error {code} {(HttpStatusCode)code}"), null);
                 else if (code == 200)
                 {
@@ -166,7 +180,7 @@ public class TracerMiddleware(RequestDelegate next)
                             }
                             catch (Exception ex)
                             {
-                                XTrace.Log.Error("[{0}]读取响应主体失败：{1}", action, ex.Message);
+                                XTrace.Log.Error("[{0}] Failed to read the response body: {1}", action, ex.Message);
                             }
                             finally
                             {
@@ -187,11 +201,6 @@ public class TracerMiddleware(RequestDelegate next)
                             span.AppendTag($"ContentType: {res.ContentType}");
                         }
                     }
-                }
-                else if (code == 404)
-                {
-                    // 取消404找不到路径的埋点，避免TraceItem过多
-                    span?.Abandon();
                 }
             }
         }
@@ -420,11 +429,11 @@ public class TracerMiddleware(RequestDelegate next)
         }
         catch (Exception ex)
         {
-            XTrace.Log.Error("保存埋点名称截断前缀失败：{0}", ex.Message);
+            XTrace.Log.Error("Failed to save the tracing name truncation prefix: {0}", ex.Message);
         }
 
         _lastPrefixesConfig = null;
-        XTrace.WriteLine("埋点名称截断前缀：{0}", value);
+        XTrace.WriteLine("Tracing name truncation prefix: {0}", value);
     }
 
     private static volatile HashSet<String>? _namePrefixes;

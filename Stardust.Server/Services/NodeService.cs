@@ -63,7 +63,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         node = CheckNode(node, inf.Node, inf.ProductCode, ip, _setting.NodeCodeLevel);
         if (node == null)
         {
-            WriteHistory(node, "节点鉴权", false, "硬件信息变动过大", ip);
+            WriteHistory(node, L.T("Node authentication"), false, L.T("Hardware information changed too much."), ip);
             return false;
         }
 
@@ -78,7 +78,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         }
         if (request.Secret.IsNullOrEmpty() || !_passwordProvider.Verify(node.Secret, request.Secret))
         {
-            WriteHistory(context, "节点鉴权", false, "密钥校验失败");
+            WriteHistory(context, L.T("Node authentication"), false, L.T("Secret validation failed."));
             return false;
         }
 
@@ -117,13 +117,13 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                 node = AutoRegister(node, inf, ip, _setting);
             }
 
-            node?.WriteHistory("动态注册", true, inf.ToJson(false, false, false), ip);
+            node?.WriteHistory(L.T("Dynamic registration"), true, inf.ToJson(false, false, false), ip);
         }
         catch (Exception ex)
         {
             span?.SetError(ex, null);
 
-            node?.WriteHistory("动态注册", false, inf.ToJson(false, false, false), ip);
+            node?.WriteHistory(L.T("Dynamic registration"), false, inf.ToJson(false, false, false), ip);
 
             throw;
         }
@@ -171,7 +171,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         }
 
         // 登录历史
-        WriteHistory(context, "节点鉴权", true, $"[{node.Name}/{node.Code}]鉴权成功 " + inf.ToJson(false, false, false));
+        WriteHistory(context, L.T("Node authentication"), true, L.T("[{0}/{1}] authenticated {2}", node.Name, node.Code, inf.ToJson(false, false, false)));
 
         // 检查节点上线恢复
         NodeOnlineService.CheckOnline(node);
@@ -244,22 +244,22 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         var level = 5;
         if (!uuid.IsNullOrEmpty() && uuid != node.Uuid)
         {
-            node.WriteHistory("登录校验", false, $"唯一标识不符！（新!=旧）{uuid}!={node.Uuid}", ip);
+            node.WriteHistory(L.T("Login validation"), false, L.T("Unique identifier mismatch (new != old): {0} != {1}", uuid, node.Uuid), ip);
             level--;
         }
         if (!guid.IsNullOrEmpty() && guid != node.MachineGuid)
         {
-            node.WriteHistory("登录校验", false, $"机器标识不符！（新!=旧）{guid}!={node.MachineGuid}", ip);
+            node.WriteHistory(L.T("Login validation"), false, L.T("Machine identifier mismatch (new != old): {0} != {1}", guid, node.MachineGuid), ip);
             level--;
         }
         if (!serial.IsNullOrEmpty() && serial != node.SerialNumber)
         {
-            node.WriteHistory("登录校验", false, $"计算机序列号不符！（新!=旧）{serial}!={node.SerialNumber}", ip);
+            node.WriteHistory(L.T("Login validation"), false, L.T("Computer serial number mismatch (new != old): {0} != {1}", serial, node.SerialNumber), ip);
             level--;
         }
         if (!board.IsNullOrEmpty() && board != node.Board)
         {
-            node.WriteHistory("登录校验", false, $"主板不符！（新!=旧）{board}!={node.Board}", ip);
+            node.WriteHistory(L.T("Login validation"), false, L.T("Motherboard mismatch (new != old): {0} != {1}", board, node.Board), ip);
             //flag = false;
         }
         //if (!diskid.IsNullOrEmpty() && diskid != node.DiskID)
@@ -269,14 +269,14 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         //}
         if (!node.ProductCode.IsNullOrEmpty() && !productCode.IsNullOrEmpty() && !node.ProductCode.EqualIgnoreCase(productCode))
         {
-            node.WriteHistory("登录校验", false, $"产品编码不符！（新!=旧）{productCode}!={node.ProductCode}", ip);
+            node.WriteHistory(L.T("Login validation"), false, L.T("Product code mismatch (new != old): {0} != {1}", productCode, node.ProductCode), ip);
             //level--;
         }
 
         // 机器名
         if (di.MachineName != node.MachineName)
         {
-            node.WriteHistory("登录校验", false, $"机器名不符！（新!=旧）{di.MachineName}!={node.MachineName}", ip);
+            node.WriteHistory(L.T("Login validation"), false, L.T("Machine name mismatch (new != old): {0} != {1}", di.MachineName, node.MachineName), ip);
         }
 
         // 网卡地址
@@ -287,7 +287,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             // 任意匹配则通过
             if (!nodems.Any(e => dims.Contains(e)))
             {
-                node.WriteHistory("登录校验", false, $"网卡地址不符！（新!=旧）{di.Macs}!={node.MACs}", ip);
+                node.WriteHistory(L.T("Login validation"), false, L.T("MAC address mismatch (new != old): {0} != {1}", di.Macs, node.MACs), ip);
                 level--;
             }
         }
@@ -300,7 +300,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             // 任意匹配则通过
             if (!nodems.Any(e => dims.Contains(e)))
             {
-                node.WriteHistory("登录校验", false, $"磁盘序列号不符！（新!=旧）{diskid}!={node.DiskID}", ip);
+                node.WriteHistory(L.T("Login validation"), false, L.T("Disk serial number mismatch (new != old): {0} != {1}", diskid, node.DiskID), ip);
                 level--;
             }
         }
@@ -320,11 +320,11 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
 
     private Node AutoRegister(Node node, LoginInfo inf, String ip, StarServerSetting set)
     {
-        if (!set.AutoRegister) throw new ApiException(ApiCode.Forbidden, "禁止自动注册");
+        if (!set.AutoRegister) throw new ApiException(ApiCode.Forbidden, L.T("Automatic registration is forbidden."));
 
         // 检查白名单
         //var ip = UserHost;
-        if (!IsMatchWhiteIP(set.WhiteIP, ip)) throw new ApiException(ApiCode.Forbidden, "非法来源，禁止注册");
+        if (!IsMatchWhiteIP(set.WhiteIP, ip)) throw new ApiException(ApiCode.Forbidden, L.T("Illegal source; registration is forbidden."));
 
         var di = inf.Node;
         using var span = _tracer?.NewSpan(nameof(AutoRegister), new { inf.ProductCode, di.UUID, di.MachineGuid, di.Macs, di.DiskID });
@@ -341,10 +341,10 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             node = QueryByInfo(inf.ProductCode, di, set.NodeCodeLevel).FirstOrDefault();
             if (node != null)
             {
-                var msg = $"检测到节点[{inf.Code}/{di.Macs}]与旧节点[{node.Code}]高度相似，选择使用旧节点";
+                var msg = L.T("Node [{0}/{1}] is highly similar to the existing node [{2}]; using the existing node", inf.Code, di.Macs, node.Code);
                 XTrace.WriteLine(msg);
                 span?.AppendTag(msg);
-                node.WriteHistory("匹配已有节点", true, msg, ip);
+                node.WriteHistory(L.T("Matched existing node"), true, msg, ip);
             }
         }
 
@@ -362,6 +362,13 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
 
         // 如果未打开动态注册，则把节点修改为禁用
         node.Enable = set.AutoRegister;
+
+        // 移动端受系统限制无法常驻，新节点默认关闭下线告警，避免间歇在线产生告警噪音
+        if (node.ID == 0)
+        {
+            var osKind = OSKindHelper.Parse(di.OSName, di.OSVersion);
+            if (osKind is OSKinds.Android or OSKinds.iOS) node.AlarmOnOffline = false;
+        }
 
         if (node.Name.IsNullOrEmpty()) node.Name = name;
 
@@ -485,13 +492,13 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                     // 有些标识符刚好带有大括号，导致误判以为是未解析变量
                     var len = p2 - p1 - 1;
                     if (len >= 2 && len < 10)
-                        XTrace.WriteLine("节点编码公式有误，存在未解析变量，uid={0}", uid);
+                        XTrace.WriteLine("The node code formula contains unresolved variables, uid={0}", uid);
                 }
             }
-            //if (uid.Contains('{') || uid.Contains('}')) XTrace.WriteLine("节点编码公式有误，存在未解析变量，uid={0}", uid);
+            //if (uid.Contains('{') || uid.Contains('}')) XTrace.WriteLine("The node code formula contains unresolved variables, uid={0}", uid);
             if (!uid.IsNullOrEmpty())
             {
-                XTrace.WriteLine("生成节点编码 uid={0} alg={1}", uid, ss[0]);
+                XTrace.WriteLine("Generated node code uid={0} alg={1}", uid, ss[0]);
 
                 // 使用产品类别加密一下，确保不同类别有不同编码
                 var buf = uid.GetBytes();
@@ -707,7 +714,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         // 检查是否已经升级过这个版本
         if (node.LastVersion == pv.Version) return null;
 
-        node.WriteHistory("自动更新", true, $"channel={ch} version={node.Version} last={node.LastVersion} => [{pv.ID}] {pv.Version} {pv.Executor}", ip);
+        node.WriteHistory(L.T("Auto update"), true, $"channel={ch} version={node.Version} last={node.LastVersion} => [{pv.ID}] {pv.Version} {pv.Executor}", ip);
 
         node.Channel = ch;
         node.LastVersion = pv.Version;
@@ -732,6 +739,13 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         var releases = ProductRelease.GetValids(channel);
         if (releases.Count == 0) return null;
 
+        // 只使用通用版本或与节点产品编码一致的版本，避免把 .NET 包发给原生 Agent
+        if (!node.ProductCode.IsNullOrEmpty())
+            releases = releases.Where(e => e.ProductCode.IsNullOrEmpty() || e.ProductCode.EqualIgnoreCase(node.ProductCode)).ToList();
+        else
+            releases = releases.Where(e => e.ProductCode.IsNullOrEmpty()).ToList();
+        if (releases.Count == 0) return null;
+
         var ip = node.UpdateIP;
 
         foreach (var release in releases)
@@ -742,7 +756,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             var pkg = release.MatchPackage(node);
             if (pkg == null) continue;
 
-            node.WriteHistory("自动更新", true, $"channel={channel} version={node.Version} last={node.LastVersion} => Release[{release.Id}] {release.Version} Package[{pkg.TargetRuntime}] {pkg.FileName}", ip);
+            node.WriteHistory(L.T("Auto update"), true, $"channel={channel} version={node.Version} last={node.LastVersion} => Release[{release.Id}] {release.Version} Package[{pkg.TargetRuntime}] {pkg.FileName}", ip);
 
             node.Channel = channel;
             node.LastVersion = release.Version;
@@ -768,23 +782,24 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         return null;
     }
 
-    /// <summary>检查节点是否符合规则，并推送dotNet运行时安装指令。新版优先匹配 DotNetPackage，回退到旧 NodeVersion 逻辑</summary>
-    /// <param name="node"></param>
-    /// <param name="ip"></param>
-    /// <returns></returns>
-    public DotNetPackage CheckDotNet(Node node, Uri baseUri, String ip)
+    /// <summary>检查节点是否符合规则，并推送dotNet运行时安装指令</summary>
+    /// <remarks>只按 NodeVersion 的 dotNet 升级策略推送；DotNetPackage 安装包表仅用于手工推送</remarks>
+    /// <param name="node">节点</param>
+    /// <param name="baseUri">服务端基础地址，用于拼接默认下载源</param>
+    /// <param name="ip">操作IP，用于写节点历史</param>
+    /// <returns>推送的版本策略，未推送时返回null</returns>
+    public NodeVersion CheckDotNet(Node node, Uri baseUri, String ip)
     {
-        // ---- 检查 NodeVersion 中是否有启用的 dotNet 策略 ----
-        // 如果旧表存在 dotNet 记录但全部被禁用，说明管理员已明确关闭 dotNet 推送，跳过全部路径
+        // 原生 Agent（Go/Rust/C++）没有 .NET 运行时，禁止推送 framework/install
+        if (node.ProductCode.EqualIgnoreCase("StarAgent-Go", "StarAgent-Rust", "StarAgent-Cpp")) return null;
+
+        // 检查 NodeVersion 中是否有启用的 dotNet 策略
+        // 如果旧表存在 dotNet 记录但全部被禁用，说明管理员已明确关闭 dotNet 推送，直接跳过
         var allNv = NodeVersion.Meta.Cache.FindAll(e => e.ProductCode.EqualIgnoreCase("dotNet")).ToList();
         if (allNv.Count > 0 && allNv.All(e => !e.Enable))
             return null;
 
-        // ---- 新路径：DotNetPackage 匹配 ----
-        var pkg = TryDotNetFromPackage(node, baseUri, ip);
-        if (pkg != null) return pkg;
-
-        // ---- 回退路径：旧 NodeVersion(ProductCode=dotNet) 逻辑 ----
+        // 找到所有产品版本
         var list = NodeVersion.GetValids(0).Where(e => e.ProductCode.EqualIgnoreCase("dotNet")).ToList();
         if (list.Count == 0) return null;
 
@@ -819,231 +834,12 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             };
             _ = SendCommand(node, model, $"NodeVersion:{pv.Version}");
 
-            node.WriteHistory("推送dotNet", true, $"version={node.Framework} => [{pv.ID}] {pv.Version} {fmodel.BaseUrl}", ip);
+            node.WriteHistory(L.T("Push dotNet"), true, $"version={node.Framework} => [{pv.ID}] {pv.Version} {fmodel.BaseUrl}", ip);
 
-            return null; // 兼容返回值，旧机制无 DotNetPackage 对象可返回
+            return pv;
         }
 
         return null;
-    }
-
-    /// <summary>尝试从新的 DotNetPackage 表中匹配 dotNet 安装包并推送</summary>
-    private DotNetPackage TryDotNetFromPackage(Node node, Uri baseUri, String ip)
-    {
-        var pkg = DotNetPackage.Match(node);
-        if (pkg == null) return null;
-
-        // 检查节点是否已经安装了该版本
-        if (!node.Framework.IsNullOrEmpty())
-        {
-            System.Version.TryParse(pkg.Version, out var targetVer);
-            System.Version.TryParse(node.Framework, out var currentVer);
-            if (currentVer != null && targetVer != null && currentVer >= targetVer && !pkg.Force)
-                return null;
-        }
-
-        // 检查 NodeVersion 中是否存在相同版本被禁用（管理员按版本控制开关）
-        var nvVer = $"v{pkg.Version}-{pkg.Kind}";
-        var disabledNv = NodeVersion.Meta.Cache.FindAll(e =>
-            e.ProductCode.EqualIgnoreCase("dotNet") &&
-            !e.Enable &&
-            e.Version.EqualIgnoreCase(nvVer)).ToList();
-        if (disabledNv.Count > 0)
-        {
-            node.WriteHistory("跳过dotNet", true, $"NodeVersion[{nvVer}] 已禁用，跳过推送", ip);
-            return null;
-        }
-
-        // 检查节点操作系统是否兼容目标.NET版本（如Ubuntu18无法安装.NET10）
-        if (!IsOSCompatible(node, pkg.Version))
-        {
-            node.WriteHistory("跳过dotNet", true, $"OS[{node.OS}] 不兼容 .NET {pkg.Version}，已跳过", ip);
-            return null;
-        }
-
-        // 检查节点的GLIBC版本是否满足要求（Linux节点上报了CLibVersion时启用）
-        var minGLibc = GetDotNetMinGLibcVersion(pkg.Version);
-        if (minGLibc != null && !CheckGLibc(node, minGLibc))
-        {
-            node.WriteHistory("跳过dotNet", true, $"GLIBC[{node.CLibVersion}] 不满足 {GetNetMajorVersion(pkg.Version)} 最低要求 {minGLibc}，.NET {pkg.Version} 已跳过", ip);
-            return null;
-        }
-
-        // 准备安装框架所需要的参数
-        // 将 Kind 嵌入 Version，Agent 端 DoInstall 可从中提取安装类型（aspnet/runtime/desktop/host）
-        var source = pkg.Source;
-        if (!source.IsNullOrEmpty() && !pkg.FileName.IsNullOrEmpty() && source.EndsWith(pkg.FileName))
-            source = source.Substring(0, source.Length - pkg.FileName.Length);
-        var fmodel = new FrameworkModel
-        {
-            Version = $"{pkg.Version}-{pkg.Kind}",
-            BaseUrl = source,
-            Force = pkg.Force,
-        };
-        // 如果没有指定源，则使用默认源
-        if (fmodel.BaseUrl.IsNullOrEmpty()) fmodel.BaseUrl = new Uri(baseUri, "/files/dotnet/").ToString();
-
-        // 检查是否已经推送过这个版本（避免重复推送）
-        var key = $"nodeNet:{node.Code}-{pkg.Version}-{pkg.Kind}";
-        if (_cacheProvider.Cache.Get<String>(key) == pkg.Version) return null;
-        _cacheProvider.Cache.Set(key, pkg.Version, 600);
-
-        var model = new CommandInModel
-        {
-            Code = node.Code,
-            Command = "framework/install",
-            Argument = fmodel.ToJson(),
-            Expire = 60,
-        };
-        _ = SendCommand(node, model, $"DotNetPackage:{pkg.Version}");
-
-        node.WriteHistory("推送dotNet", true, $"version={node.Framework} => Package[{pkg.Id}] {pkg.Version}-{pkg.Kind} {pkg.Source}", ip);
-
-        return pkg;
-    }
-
-    /// <summary>检查节点操作系统是否兼容目标.NET版本。防止向过旧的操作系统推送不支持的.NET运行时</summary>
-    /// <param name="node">节点</param>
-    /// <param name="version">目标.NET版本号，如 10.0.9</param>
-    /// <returns>兼容返回true，不兼容返回false</returns>
-    private static Boolean IsOSCompatible(Node node, String version)
-    {
-        if (node.OS.IsNullOrEmpty() || version.IsNullOrEmpty()) return true;
-        if (!System.Version.TryParse(version.TrimStart('v', 'V'), out var ver)) return true;
-
-        var os = node.OS;
-        var major = ver.Major;
-
-        // 提取操作系统名称和版本号
-        Double osVer = 0;
-        var dist = "";
-
-        // 匹配常见 Linux 发行版
-        if (os.StartsWithIgnoreCase("Ubuntu"))
-        {
-            dist = "Ubuntu";
-            // "Ubuntu 18.04.5 LTS" → 18.04
-            var part = os.Split(' ').Skip(1).FirstOrDefault();
-            Double.TryParse(part, out osVer);
-        }
-        else if (os.StartsWithIgnoreCase("Debian"))
-        {
-            dist = "Debian";
-            // "Debian GNU/Linux 11 (bullseye)" → 11
-            foreach (var s in os.Split(' '))
-            {
-                if (Double.TryParse(s, out var v)) { osVer = v; break; }
-            }
-        }
-        else if (os.StartsWithIgnoreCase("CentOS") || os.StartsWithIgnoreCase("RHEL") || os.StartsWithIgnoreCase("Red Hat"))
-        {
-            dist = "RHEL";
-            // "CentOS Linux 7 (Core)" → 7
-            foreach (var s in os.Split(' '))
-            {
-                if (Double.TryParse(s, out var v)) { osVer = v; break; }
-            }
-        }
-
-        // 检查兼容性
-        if (osVer > 0)
-        {
-            if (major >= 10)
-            {
-                if (dist == "Ubuntu") return osVer >= 22.04;
-                if (dist == "Debian") return osVer >= 12;
-                if (dist == "RHEL") return osVer >= 9;
-            }
-            else if (major >= 8)
-            {
-                if (dist == "Ubuntu") return osVer >= 20.04;
-                if (dist == "Debian") return osVer >= 11;
-                if (dist == "RHEL") return osVer >= 8;
-            }
-            else if (major >= 6)
-            {
-                if (dist == "Ubuntu") return osVer >= 16.04;
-                if (dist == "Debian") return osVer >= 10;
-                if (dist == "RHEL") return osVer >= 7;
-            }
-        }
-
-        // 未知操作系统或无法识别版本时，默认兼容（不阻塞推送）
-        return true;
-    }
-
-    /// <summary>获取指定.NET版本要求的最低GLIBC版本（硬编码，每年随.NET大版本更新一次）</summary>
-    /// <param name="version">.NET版本号，如 10.0.9</param>
-    /// <returns>最低GLIBC版本号，如 2.17；未知时返回 null</returns>
-    /// <remarks>
-    /// .NET 版本与 glibc 兼容性历史：
-    /// .NET 6/7/8 → glibc 2.17+（CentOS 7 及更新）
-    /// .NET 9/10  → glibc 2.27+（CentOS 8/Ubuntu 18.04 及更新）
-    /// 首次发行年份：.NET 6=2021, .NET 7=2022, .NET 8=2023, .NET 9=2024, .NET 10=2025
-    /// </remarks>
-    private static String? GetDotNetMinGLibcVersion(String version)
-    {
-        if (version.IsNullOrEmpty()) return null;
-        if (!System.Version.TryParse(version.TrimStart('v', 'V'), out var ver)) return null;
-
-        var major = ver.Major;
-
-        // .NET 9+ 要求 glibc 2.27+
-        if (major >= 9) return "2.27";
-        // .NET 6/7/8 支持 glibc 2.17+
-        if (major >= 6) return "2.17";
-
-        return null;
-    }
-
-    /// <summary>获取.NET版本的主要代号字符串，用于日志显示</summary>
-    private static String GetNetMajorVersion(String version)
-    {
-        if (version.IsNullOrEmpty()) return "";
-        if (!System.Version.TryParse(version.TrimStart('v', 'V'), out var ver)) return "";
-        return $".NET {ver.Major}";
-    }
-
-    /// <summary>检查节点的GLIBC版本是否满足最低要求</summary>
-    /// <param name="node">节点</param>
-    /// <param name="minVersion">最低GLIBC版本号，如 2.17</param>
-    /// <returns>满足返回true，不满足返回false</returns>
-    /// <remarks>
-    /// 仅当节点为Linux且上报了CLibVersion时启用精确检查。
-    /// CLibVersion 格式示例：glibc 2.17、glibc 2.27、musl 1.2.2；可能形如 glibc 2.17;glibcxx 3.4.30
-    /// 使用 System.Version 逐段比较 major.minor，忽略后缀 patch 版本。
-    /// </remarks>
-    private static Boolean CheckGLibc(Node node, String minVersion)
-    {
-        // 非 Linux 或未上报 CLibVersion 时跳过检查
-        if (node.CLibVersion.IsNullOrEmpty()) return true;
-        if (!node.OS.StartsWithIgnoreCase("Linux") && !node.OS.StartsWithIgnoreCase("CentOS") &&
-            !node.OS.StartsWithIgnoreCase("Ubuntu") && !node.OS.StartsWithIgnoreCase("Debian") &&
-            !node.OS.StartsWithIgnoreCase("RHEL") && !node.OS.StartsWithIgnoreCase("Red Hat"))
-            return true;
-
-        if (!System.Version.TryParse(minVersion, out var min)) return true;
-
-        // 从 CLibVersion 中提取 glibc 版本号
-        // 格式：glibc 2.17 或 glibc 2.17;glibcxx 3.4.30
-        var clib = node.CLibVersion;
-        var p = clib.IndexOf(';');
-        if (p > 0) clib = clib.Substring(0, p);
-        clib = clib.Trim();
-
-        // 提取 glibc x.y 或 musl x.y.z
-        if (!clib.StartsWithIgnoreCase("glibc ") && !clib.StartsWithIgnoreCase("musl ")) return true;
-
-        var verStr = clib.Substring(clib.IndexOf(' ') + 1).Trim();
-        if (verStr.IsNullOrEmpty()) return true;
-
-        if (!System.Version.TryParse(verStr, out var current)) return true;
-
-        // 只比较 major.minor，patch 版本不影响兼容性
-        var currentMajorMinor = current.Major * 10000 + current.Minor;
-        var minMajorMinor = min.Major * 10000 + min.Minor;
-
-        return currentMajorMinor >= minMajorMinor;
     }
     #endregion
 
@@ -1054,29 +850,29 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
     /// <returns></returns>
     public override Task<CommandReplyModel?> SendCommand(DeviceContext context, CommandInModel model, CancellationToken cancellationToken = default)
     {
-        if (model.Code.IsNullOrEmpty()) throw new ArgumentNullException(nameof(model.Code), "必须指定节点");
+        if (model.Code.IsNullOrEmpty()) throw new ArgumentNullException(nameof(model.Code), L.T("Node must be specified."));
         if (model.Command.IsNullOrEmpty()) throw new ArgumentNullException(nameof(model.Command));
 
         var node = Node.FindByCode(model.Code);
-        if (node == null) throw new ArgumentOutOfRangeException(nameof(model.Code), "无效节点");
+        if (node == null) throw new ArgumentOutOfRangeException(nameof(model.Code), L.T("Invalid node."));
 
         var (jwt, ex) = _tokenService.DecodeToken(context.Token);
         if (ex != null) throw ex;
 
         var app = App.FindByName(jwt?.Subject);
-        if (app == null) throw new ApiException(ApiCode.Unauthorized, "无权操作！");
+        if (app == null) throw new ApiException(ApiCode.Unauthorized, L.T("No permission to perform this operation."));
 
         // 安全V-2：未配置密钥的应用（如种子StarWeb）可被匿名冒用登录，禁止其向节点下发命令，防止全节点RCE
         if (app.Secret.IsNullOrEmpty())
-            throw new ApiException(ApiCode.Forbidden, $"[{app}]未配置密钥，禁止下发节点命令！请在注册中心为该应用设置Secret");
+            throw new ApiException(ApiCode.Forbidden, L.T("[{0}] has no secret configured; node commands are forbidden. Set a Secret for this application in the registry.", app));
 
         if (!app.AllowControlNodes.IsNullOrEmpty())
         {
             if (app.AllowControlNodes != "*" && !node.Code.EqualIgnoreCase(app.AllowControlNodes.Split(",")))
-                throw new ApiException(ApiCode.Forbidden, $"[{app}]无权操作节点[{node}]！\n安全设计需要，默认禁止所有应用向任意节点发送控制指令。\n可在注册中心应用系统中修改[{app}]的可控节点，添加[{node.Code}]，或者设置为*所有节点。");
+                throw new ApiException(ApiCode.Forbidden, L.T("[{0}] is not allowed to operate node [{1}].\nFor security, applications cannot send control commands to arbitrary nodes by default.\nIn the registry, edit the controllable nodes of [{0}], add [{2}], or set it to * for all nodes.", app, node, node.Code));
         }
         else if (!_setting.AllowControlNodesWhenEmpty)
-            throw new ApiException(ApiCode.Unauthorized, "无权操作！");
+            throw new ApiException(ApiCode.Unauthorized, L.T("No permission to perform this operation."));
 
         return SendCommand(node, model, app + "", cancellationToken);
     }
@@ -1132,7 +928,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
 
         // 安全V-17：防止水平越权，只允许命令所属节点回包（禁止伪造其它节点的命令状态）
         if (node == null || cmd.NodeID != node.ID)
-            throw new ApiException(ApiCode.Forbidden, $"[{node?.Name}]越权回包命令[{cmd.Id}]，命令属于节点[{cmd.NodeID}]");
+            throw new ApiException(ApiCode.Forbidden, L.T("[{0}] attempted to reply to command [{1}] that belongs to node [{2}]", node?.Name, cmd.Id, cmd.NodeID));
 
         cmd.Status = model.Status;
         cmd.Result = model.Data;
@@ -1192,7 +988,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                 {
                     // 写编译成功历史（粒度日志由 Agent PostEvents 负责）
                     if (pipeline != null)
-                        AppDeployHistory.Create(pipeline.DeployId, cmd.NodeID, "deploy/compile/Build-Upload", true, $"编译完成，run={run.Id}", ip).Insert();
+                        AppDeployHistory.Create(pipeline.DeployId, cmd.NodeID, "deploy/compile/Build-Upload", true, L.T("Build completed, run={0}", run.Id), ip).Insert();
 
                     // 取版本 + 使用版本（必须在部署下发前；等价于 Web「使用版本」按钮 app.Version=ver.Version）
                     var version = pipeline != null ? AppDeployVersion.FindAllByDeployId(pipeline.DeployId, 1).FirstOrDefault() : null;
@@ -1205,22 +1001,22 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                             app.Update();
                         }
                         if (pipeline != null)
-                            AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/version", true, $"使用版本 {version.Version}（Id={version.Id}）", ip).Insert();
+                            AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/version", true, L.T("Using version {0} (Id={1})", version.Version, version.Id), ip).Insert();
                     }
                     else
                     {
                         if (pipeline != null)
-                            AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/version", false, "未取到可部署版本", ip).Insert();
+                            AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/version", false, L.T("No deployable version was found."), ip).Insert();
                     }
                     run.BuildFinishedTime = DateTime.Now;
 
                     if (pipeline == null || !pipeline.AutoDeploy)
                     {
                         run.Status = PipelineStatus.Success;
-                        run.Remark = pipeline == null ? "流水线配置不存在" : "自动部署未开启，流水线结束";
+                        run.Remark = pipeline == null ? L.T("The pipeline configuration does not exist.") : L.T("Auto deploy is disabled; the pipeline ends.");
                         run.Update();
                         if (pipeline != null)
-                            AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/autoDeploy", true, "自动部署未开启，流水线结束", ip).Insert();
+                            AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/autoDeploy", true, L.T("Auto deploy is disabled; the pipeline ends."), ip).Insert();
                     }
                     else
                     {
@@ -1228,7 +1024,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                         {
                             // 编译成功但未产出可部署版本（如未开启上传），无法自动部署
                             run.Status = PipelineStatus.Failed;
-                            run.Remark = "编译成功但未产出可部署版本（可能未开启上传），无法自动部署";
+                            run.Remark = L.T("The build succeeded but produced no deployable version (upload may be disabled); auto deploy is not possible.");
                             run.Update();
                             AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/autoDeploy", false, run.Remark, ip).Insert();
                             return;
@@ -1236,7 +1032,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                         run.Status = PipelineStatus.Deploying;
                         run.DeployStartedTime = DateTime.Now;
                         run.Update();
-                        AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/autoDeploy", true, $"开始自动部署，run={run.Id}，版本={version.Version}", ip).Insert();
+                        AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/autoDeploy", true, L.T("Starting auto deploy, run={0}, version={1}", run.Id, version.Version), ip).Insert();
                         await DispatchDeployAsync(run, pipeline, app, ip);
 
                         // 收尾：本次实际下发的部署命令数为 0（节点为空 / 全部 Skipped / 全部下发失败）时直接完成判定，
@@ -1248,13 +1044,13 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                             if (deploySteps.Any(e => e.Status == "Failed"))
                             {
                                 run.Status = PipelineStatus.Failed;
-                                run.Remark = "部署命令下发失败";
+                                run.Remark = L.T("Failed to dispatch the deploy command.");
                             }
                             else if (!deploySteps.Any(e => e.Status == "Success") && !deploySteps.Any(e => e.Status == "Skipped"))
                             {
                                 // 没有任何部署步骤（通常因为未配置部署节点），不能标记为成功
                                 run.Status = PipelineStatus.Failed;
-                                run.Remark = "未找到可部署节点，请检查流水线部署节点配置";
+                                run.Remark = L.T("No deployable node was found; check the pipeline deploy node configuration.");
                             }
                             else
                             {
@@ -1262,7 +1058,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                             }
                             run.Update();
                             if (pipeline != null)
-                                AppDeployHistory.Create(pipeline.DeployId, 0, "deploy/install", run.Status == PipelineStatus.Success, run.Status == PipelineStatus.Success ? "部署完成" : run.Remark, ip).Insert();
+                                AppDeployHistory.Create(pipeline.DeployId, 0, "deploy/install", run.Status == PipelineStatus.Success, run.Status == PipelineStatus.Success ? L.T("Deployment completed.") : run.Remark, ip).Insert();
                             return;
                         }
                     }
@@ -1295,7 +1091,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                         run.Update();
                         // 写部署完成历史（与 Build 分支风格一致）
                         if (pipeline != null)
-                            AppDeployHistory.Create(pipeline.DeployId, step.NodeId, "deploy/install/Deploy", true, "部署成功", ip).Insert();
+                            AppDeployHistory.Create(pipeline.DeployId, step.NodeId, "deploy/install/Deploy", true, L.T("Deployment succeeded."), ip).Insert();
                     }
                 }
                 else
@@ -1340,7 +1136,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         // 未勾选任何部署节点：不回退、不乱部署，仅记录明确日志并结束（上层据此标记 Failed，避免假成功）
         if (nodeIds.Length == 0)
         {
-            AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/autoDeploy", false, "自动部署未触发：流水线未勾选任何部署节点", ip).Insert();
+            AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/autoDeploy", false, L.T("Auto deploy was not triggered: no deploy node is selected for the pipeline."), ip).Insert();
             return;
         }
 
@@ -1364,19 +1160,19 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             if (dn == null)
             {
                 deployStep.Status = "Skipped";
-                deployStep.Message = $"部署节点[{nid}]不存在";
+                deployStep.Message = L.T("Deployment node [{0}] does not exist.", nid);
                 AppDeployHistory.Create(pipeline.DeployId, 0, "pipeline/autoDeploy", false, deployStep.Message, ip).Insert();
             }
             else if (!dn.Enable)
             {
                 deployStep.Status = "Skipped";
-                deployStep.Message = $"部署节点[{dn.NodeName}]未启用";
+                deployStep.Message = L.T("Deployment node [{0}] is disabled.", dn.NodeName);
                 AppDeployHistory.Create(pipeline.DeployId, dn.NodeId, "pipeline/autoDeploy", false, deployStep.Message, ip).Insert();
             }
             else if (dn.DeployId != pipeline.DeployId)
             {
                 deployStep.Status = "Skipped";
-                deployStep.Message = $"部署节点[{dn.NodeName}]DeployId 不匹配";
+                deployStep.Message = L.T("Deployment node [{0}] DeployId mismatch.", dn.NodeName);
                 AppDeployHistory.Create(pipeline.DeployId, dn.NodeId, "pipeline/autoDeploy", false, deployStep.Message, ip).Insert();
             }
             else
@@ -1385,7 +1181,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                 if (node == null)
                 {
                     deployStep.Status = "Skipped";
-                    deployStep.Message = $"节点[{dn.NodeId}]不存在";
+                    deployStep.Message = L.T("Node [{0}] does not exist.", dn.NodeId);
                     AppDeployHistory.Create(pipeline.DeployId, dn.NodeId, "pipeline/autoDeploy", false, deployStep.Message, ip).Insert();
                 }
                 else
@@ -1407,14 +1203,14 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                         };
                         var reply = await SendCommand(node, cmdModel, "Pipeline");
                         deployStep.CommandId = (Int32)(reply?.Id ?? 0);
-                        AppDeployHistory.Create(pipeline.DeployId, dn.NodeId, "deploy/install", true, $"已向节点 {dn.NodeName} 下发部署命令（CommandId={deployStep.CommandId}）", ip).Insert();
+                        AppDeployHistory.Create(pipeline.DeployId, dn.NodeId, "deploy/install", true, L.T("Deploy command dispatched to node {0} (CommandId={1}).", dn.NodeName, deployStep.CommandId), ip).Insert();
                     }
                     catch (Exception ex)
                     {
                         deployStep.Status = "Failed";
                         deployStep.FinishedTime = DateTime.Now;
                         deployStep.Message = ex.Message;
-                        AppDeployHistory.Create(pipeline.DeployId, dn.NodeId, "deploy/install", false, $"向节点 {dn.NodeName} 下发部署命令失败：{ex.Message}", ip).Insert();
+                        AppDeployHistory.Create(pipeline.DeployId, dn.NodeId, "deploy/install", false, L.T("Failed to dispatch the deploy command to node {0}: {1}", dn.NodeName, ex.Message), ip).Insert();
                     }
                 }
             }

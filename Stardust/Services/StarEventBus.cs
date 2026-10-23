@@ -87,7 +87,7 @@ public class StarEventBus<TEvent>(AppClient client, String topic) : EventBus<TEv
             await client.PublishEventAsync(topic, "subscribe").ConfigureAwait(false);
             _subscribed = true;
 
-            Log?.Info("事件总线[{0}]远程订阅成功！", topic);
+            Log?.Info("Event bus [{0}] remote subscription succeeded!", topic);
 
             return true;
         }
@@ -129,7 +129,7 @@ public class StarEventBus<TEvent>(AppClient client, String topic) : EventBus<TEv
         await client.PublishEventAsync(topic, "unsubscribe", cancellationToken).ConfigureAwait(false);
         _subscribed = false;
 
-        Log?.Info("事件总线[{0}]远程取消订阅成功！", topic);
+        Log?.Info("Event bus [{0}] remote unsubscription succeeded!", topic);
 
         return await base.UnsubscribeAsync(clientId, cancellationToken).ConfigureAwait(false);
     }
@@ -163,6 +163,8 @@ public class StarEventBus<TEvent>(AppClient client, String topic) : EventBus<TEv
     public Task HandleAsync(String message, IEventContext? context, CancellationToken cancellationToken)
     {
         using var span = Tracer?.NewSpan($"event:{topic}", message);
+        // 附加消费上下文，便于排查问题（仅追加标签，不影响原消费逻辑）
+        span?.AppendTag(new { topic, clientId = Runtime.ClientId, messageLength = message?.Length ?? 0, eventType = typeof(TEvent).Name });
         try
         {
             context ??= new StringEventContext(this, message);
@@ -177,6 +179,8 @@ public class StarEventBus<TEvent>(AppClient client, String topic) : EventBus<TEv
         }
         catch (Exception ex)
         {
+            // 保留原始消息片段，便于定位反序列化失败或消费异常
+            span?.AppendTag(new { exceptionType = ex.GetType().Name, rawMessage = message?.Cut(200) });
             span?.SetError(ex);
         }
 

@@ -1,4 +1,4 @@
-﻿#if !NET40
+#if !NET40
 using System.Diagnostics;
 using System.Net.NetworkInformation;
 using System.Runtime.InteropServices;
@@ -66,10 +66,10 @@ public class StarApi : IHttpController
     /// <returns>服务列表，含运行状态</returns>
     public Object Services()
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         var manager = GetManager();
-        if (manager == null) return new { code = 500, message = "Service manager not available" };
+        if (manager == null) return new { code = 500, message = L.T("Service manager not available") };
 
         var list = manager.Services;
         var runningList = manager.RunningServices;
@@ -118,12 +118,12 @@ public class StarApi : IHttpController
     /// <returns>操作结果</returns>
     public Object StartService(String serviceName)
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         var manager = GetManager();
-        if (manager == null) return new { code = 500, message = "Service manager not available" };
+        if (manager == null) return new { code = 500, message = L.T("Service manager not available") };
 
-        if (serviceName.IsNullOrEmpty()) return new { code = 400, message = "服务名称不能为空" };
+        if (serviceName.IsNullOrEmpty()) return new { code = 400, message = L.T("Service name cannot be empty.") };
 
         try
         {
@@ -131,13 +131,13 @@ public class StarApi : IHttpController
             return new
             {
                 code = result ? 0 : 1,
-                message = result ? "服务启动成功" : "服务启动失败或服务不存在",
+                message = result ? L.T("Service started successfully.") : L.T("Service failed to start or does not exist."),
                 serviceName
             };
         }
         catch (Exception ex)
         {
-            return new { code = 1, message = $"启动服务时发生错误: {ex.Message}", serviceName };
+            return new { code = 1, message = L.T("Error while starting service: {0}", ex.Message), serviceName };
         }
     }
 
@@ -146,26 +146,26 @@ public class StarApi : IHttpController
     /// <returns>操作结果</returns>
     public Object StopService(String serviceName)
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         var manager = GetManager();
-        if (manager == null) return new { code = 500, message = "Service manager not available" };
+        if (manager == null) return new { code = 500, message = L.T("Service manager not available") };
 
-        if (serviceName.IsNullOrEmpty()) return new { code = 400, message = "服务名称不能为空" };
+        if (serviceName.IsNullOrEmpty()) return new { code = 400, message = L.T("Service name cannot be empty.") };
 
         try
         {
-            var result = manager.Stop(serviceName, "Web面板调用停止");
+            var result = manager.Stop(serviceName, L.TLog("Stopped from the web panel"));
             return new
             {
                 code = result ? 0 : 1,
-                message = result ? "服务停止成功" : "服务停止失败或服务不存在",
+                message = result ? L.T("Service stopped successfully.") : L.T("Service failed to stop or does not exist."),
                 serviceName
             };
         }
         catch (Exception ex)
         {
-            return new { code = 1, message = $"停止服务时发生错误: {ex.Message}", serviceName };
+            return new { code = 1, message = L.T("Error while stopping service: {0}", ex.Message), serviceName };
         }
     }
 
@@ -174,12 +174,12 @@ public class StarApi : IHttpController
     /// <returns>操作结果</returns>
     public Object RestartService(String serviceName)
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         var manager = GetManager();
-        if (manager == null) return new { code = 500, message = "Service manager not available" };
+        if (manager == null) return new { code = 500, message = L.T("Service manager not available") };
 
-        if (serviceName.IsNullOrEmpty()) return new { code = 400, message = "服务名称不能为空" };
+        if (serviceName.IsNullOrEmpty()) return new { code = 400, message = L.T("Service name cannot be empty.") };
 
         try
         {
@@ -187,8 +187,8 @@ public class StarApi : IHttpController
             var running = manager.RunningServices?.Any(e => e.Name.EqualIgnoreCase(serviceName)) == true;
             if (running)
             {
-                var stopResult = manager.Stop(serviceName, "Web面板调用重启");
-                if (!stopResult) return new { code = 1, message = "停止服务失败", serviceName };
+                var stopResult = manager.Stop(serviceName, L.TLog("Restarted from the web panel"));
+                if (!stopResult) return new { code = 1, message = L.T("Failed to stop service."), serviceName };
                 Thread.Sleep(1000);
             }
 
@@ -197,13 +197,13 @@ public class StarApi : IHttpController
             return new
             {
                 code = startResult ? 0 : 1,
-                message = startResult ? "服务重启成功" : "启动服务失败",
+                message = startResult ? L.T("Service restarted successfully.") : L.T("Failed to start service."),
                 serviceName
             };
         }
         catch (Exception ex)
         {
-            return new { code = 1, message = $"重启服务时发生错误: {ex.Message}", serviceName };
+            return new { code = 1, message = L.T("Error while restarting service: {0}", ex.Message), serviceName };
         }
     }
 
@@ -212,13 +212,13 @@ public class StarApi : IHttpController
     /// <returns>操作结果</returns>
     public Object AddService(ServiceInfo info)
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         var manager = GetManager();
-        if (manager == null) return new { code = 500, message = "Service manager not available" };
+        if (manager == null) return new { code = 500, message = L.T("Service manager not available") };
 
         if (info == null || info.Name.IsNullOrEmpty())
-            return new { code = 400, message = "服务名称不能为空" };
+            return new { code = 400, message = L.T("Service name cannot be empty.") };
 
         try
         {
@@ -229,11 +229,11 @@ public class StarApi : IHttpController
             set.Services = manager.Services;
             set.Save();
 
-            return new { code = 0, message = $"服务 [{info.Name}] 已添加/更新", serviceName = info.Name };
+            return new { code = 0, message = L.T("Service [{0}] added or updated.", info.Name), serviceName = info.Name };
         }
         catch (Exception ex)
         {
-            return new { code = 1, message = $"添加服务时发生错误: {ex.Message}" };
+            return new { code = 1, message = L.T("Error while adding service: {0}", ex.Message) };
         }
     }
 
@@ -242,18 +242,18 @@ public class StarApi : IHttpController
     /// <returns>操作结果</returns>
     public Object RemoveService(String serviceName)
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         var manager = GetManager();
-        if (manager == null) return new { code = 500, message = "Service manager not available" };
+        if (manager == null) return new { code = 500, message = L.T("Service manager not available") };
 
-        if (serviceName.IsNullOrEmpty()) return new { code = 400, message = "服务名称不能为空" };
+        if (serviceName.IsNullOrEmpty()) return new { code = 400, message = L.T("Service name cannot be empty.") };
 
         try
         {
             // 先停止服务
             if (manager.RunningServices?.Any(e => e.Name.EqualIgnoreCase(serviceName)) == true)
-                manager.Stop(serviceName, "Web面板调用删除");
+                manager.Stop(serviceName, L.TLog("Removed from the web panel"));
 
             manager.Remove(serviceName);
 
@@ -262,11 +262,11 @@ public class StarApi : IHttpController
             set.Services = manager.Services;
             set.Save();
 
-            return new { code = 0, message = $"服务 [{serviceName}] 已删除", serviceName };
+            return new { code = 0, message = L.T("Service [{0}] removed.", serviceName), serviceName };
         }
         catch (Exception ex)
         {
-            return new { code = 1, message = $"删除服务时发生错误: {ex.Message}", serviceName };
+            return new { code = 1, message = L.T("Error while removing service: {0}", ex.Message), serviceName };
         }
     }
     #endregion
@@ -276,7 +276,7 @@ public class StarApi : IHttpController
     /// <returns>StarSetting + StarAgentSetting 所有配置项</returns>
     public Object GetStarConfig()
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         var starSet = GetStarSetting();
         var agentSet = GetAgentSetting();
@@ -284,24 +284,25 @@ public class StarApi : IHttpController
         var items = new List<Object>();
 
         // StarSetting 配置项
-        items.Add(new { group = "StarServer 连接", items = new Object[]
+        items.Add(new { group = L.T("StarServer connection"), items = new Object[]
         {
-            new { name = "Server", displayName = "服务端地址", value = (Object)(starSet.Server ?? ""), type = "String", description = "星尘服务端地址，如 http://star.newlifex.com:6600" },
-            new { name = "AppKey", displayName = "应用标识", value = (Object)(starSet.AppKey ?? ""), type = "String", description = "接入星尘注册中心的应用标识" },
-            new { name = "Secret", displayName = "应用密钥", value = (Object)(starSet.Secret ?? ""), type = "Password", description = "接入星尘注册中心的应用密钥" },
+            new { name = "Server", displayName = L.T("Server address"), value = (Object)(starSet.Server ?? ""), type = "String", description = L.T("Stardust server address, e.g. http://star.newlifex.com:6600") },
+            new { name = "AppKey", displayName = L.T("Application ID"), value = (Object)(starSet.AppKey ?? ""), type = "String", description = L.T("Application ID registered with the Stardust registry") },
+            new { name = "Secret", displayName = L.T("Application secret"), value = (Object)(starSet.Secret ?? ""), type = "Password", description = L.T("Application secret registered with the Stardust registry") },
         }});
 
-        items.Add(new { group = "StarAgent 本地配置", items = new Object[]
+        items.Add(new { group = L.T("StarAgent local settings"), items = new Object[]
         {
-            new { name = "LocalPort", displayName = "本地端口(UDP)", value = (Object)agentSet.LocalPort, type = "Int32", description = "本地API通信端口（UDP），默认5500。与 Web 面板端口共用，UDP 用于本地 RPC，TCP 用于 Web 面板" },
-            new { name = "Code", displayName = "节点编码", value = (Object)(agentSet.Code ?? ""), type = "String", description = "当前节点的唯一编码" },
-            new { name = "Secret_Agent", displayName = "节点密钥", value = (Object)(agentSet.Secret ?? ""), type = "Password", description = "节点通信密钥" },
-            new { name = "Project", displayName = "项目名", value = (Object)(agentSet.Project ?? ""), type = "String", description = "新节点默认所要加入的项目" },
-            new { name = "Channel", displayName = "更新通道", value = (Object)agentSet.Channel, type = "String", description = "更新通道：Release/Debug" },
-            new { name = "Delay", displayName = "延迟时间(ms)", value = (Object)agentSet.Delay, type = "Int32", description = "重启进程或服务的延迟时间，默认3000ms" },
-            new { name = "SyncTime", displayName = "同步间隔(s)", value = (Object)agentSet.SyncTime, type = "Int32", description = "定期同步服务器时间到本地，0表示不同步" },
-            new { name = "StartupHook", displayName = "启动挂钩", value = (Object)agentSet.StartupHook, type = "Boolean", description = "拉起目标进程时对dotNet应用注入星尘监控钩子" },
-            new { name = "UseAutorun", displayName = "Windows自启动", value = (Object)agentSet.UseAutorun, type = "Boolean", description = "自启动需要用户登录桌面，默认false使用系统服务" },
+            new { name = "LocalPort", displayName = L.T("Local port (UDP)"), value = (Object)agentSet.LocalPort, type = "Int32", description = L.T("Local API port (UDP), default 5500. Shares the port with the web panel: UDP for local RPC, TCP for the web panel") },
+            new { name = "WebBind", displayName = L.T("Panel bind address"), value = (Object)(agentSet.WebBind ?? ""), type = "String", description = L.T("Web panel listen address, default 127.0.0.1 for local access only. Set to * for all interfaces or a specific IP. Requires a StarAgent restart") },
+            new { name = "Code", displayName = L.T("Node code"), value = (Object)(agentSet.Code ?? ""), type = "String", description = L.T("Unique code of the current node") },
+            new { name = "Secret_Agent", displayName = L.T("Node secret"), value = (Object)(agentSet.Secret ?? ""), type = "Password", description = L.T("Secret used for node communication") },
+            new { name = "Project", displayName = L.T("Project"), value = (Object)(agentSet.Project ?? ""), type = "String", description = L.T("Project the new node joins by default") },
+            new { name = "Channel", displayName = L.T("Update channel"), value = (Object)agentSet.Channel, type = "String", description = L.T("Update channel: Release/Debug") },
+            new { name = "Delay", displayName = L.T("Delay (ms)"), value = (Object)agentSet.Delay, type = "Int32", description = L.T("Delay before restarting the process or service, default 3000 ms") },
+            new { name = "SyncTime", displayName = L.T("Sync interval (s)"), value = (Object)agentSet.SyncTime, type = "Int32", description = L.T("Periodically sync server time to local, 0 to disable") },
+            new { name = "StartupHook", displayName = L.T("Startup hook"), value = (Object)agentSet.StartupHook, type = "Boolean", description = L.T("Inject the Stardust monitoring hook into .NET applications when launching the target process") },
+            new { name = "UseAutorun", displayName = L.T("Windows autorun"), value = (Object)agentSet.UseAutorun, type = "Boolean", description = L.T("Autorun requires a signed-in desktop; false by default uses the system service") },
         }});
 
         return new { code = 0, data = new { groups = items } };
@@ -312,10 +313,10 @@ public class StarApi : IHttpController
     /// <returns>操作结果</returns>
     public Object UpdateStarConfig(Dictionary<String, Object> updates)
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         if (updates == null || updates.Count == 0)
-            return new { code = 400, message = "没有需要更新的配置项" };
+            return new { code = 400, message = L.T("No configuration items to update.") };
 
         try
         {
@@ -326,7 +327,7 @@ public class StarApi : IHttpController
 
             // 安全白名单：只允许更新以下字段
             var starFields = new[] { "Server", "AppKey", "Secret" };
-            var agentFields = new[] { "LocalPort", "Code", "Secret", "Project", "Channel", "Delay", "SyncTime", "StartupHook", "UseAutorun" };
+            var agentFields = new[] { "LocalPort", "WebBind", "Code", "Secret", "Project", "Channel", "Delay", "SyncTime", "StartupHook", "UseAutorun" };
 
             foreach (var kv in updates)
             {
@@ -348,6 +349,7 @@ public class StarApi : IHttpController
                     switch (name)
                     {
                         case "LocalPort": agentSet.LocalPort = Convert.ToInt32(value ?? 5500); break;
+                        case "WebBind": agentSet.WebBind = value?.ToString() ?? "127.0.0.1"; break;
                         case "Code": agentSet.Code = value?.ToString() ?? ""; break;
                         case "Secret": agentSet.Secret = value?.ToString(); break;
                         case "Project": agentSet.Project = value?.ToString(); break;
@@ -368,11 +370,11 @@ public class StarApi : IHttpController
             if (changedStar) saved.Add("StarSetting");
             if (changedAgent) saved.Add("StarAgentSetting");
 
-            return new { code = 0, message = $"配置已保存到: {saved.Join(", ")}" };
+            return new { code = 0, message = L.T("Configuration saved to: {0}", saved.Join(", ")) };
         }
         catch (Exception ex)
         {
-            return new { code = 1, message = $"保存配置时发生错误: {ex.Message}" };
+            return new { code = 1, message = L.T("Error while saving configuration: {0}", ex.Message) };
         }
     }
     #endregion
@@ -382,7 +384,7 @@ public class StarApi : IHttpController
     /// <returns>丰富的本机信息</returns>
     public Object Machine()
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         try
         {
@@ -537,7 +539,7 @@ public class StarApi : IHttpController
         }
         catch (Exception ex)
         {
-            return new { code = 1, message = $"获取本机信息时发生错误: {ex.Message}" };
+            return new { code = 1, message = L.T("Error while getting machine information: {0}", ex.Message) };
         }
     }
 
@@ -547,7 +549,7 @@ public class StarApi : IHttpController
     /// <returns>进程列表</returns>
     public Object GetProcessList(String sort = "memory", Int32 count = 10)
     {
-        if (!CheckAuth()) return new { code = 401, message = "Unauthorized" };
+        if (!CheckAuth()) return new { code = 401, message = L.T("Unauthorized") };
 
         try
         {
@@ -593,7 +595,7 @@ public class StarApi : IHttpController
         }
         catch (Exception ex)
         {
-            return new { code = 1, message = $"获取进程列表时发生错误: {ex.Message}" };
+            return new { code = 1, message = L.T("Error while getting process list: {0}", ex.Message) };
         }
     }
     #endregion
@@ -618,9 +620,9 @@ public class StarApi : IHttpController
     private static String FormatUptime(Int64 seconds)
     {
         var ts = TimeSpan.FromSeconds(seconds);
-        if (ts.TotalDays >= 1) return $"{(Int32)ts.TotalDays}天{ts.Hours}小时{ts.Minutes}分";
-        if (ts.TotalHours >= 1) return $"{(Int32)ts.TotalHours}小时{ts.Minutes}分";
-        return $"{ts.Minutes}分{ts.Seconds}秒";
+        if (ts.TotalDays >= 1) return L.T("{0}d {1}h {2}m", (Int32)ts.TotalDays, ts.Hours, ts.Minutes);
+        if (ts.TotalHours >= 1) return L.T("{0}h {1}m", (Int32)ts.TotalHours, ts.Minutes);
+        return L.T("{0}m {1}s", ts.Minutes, ts.Seconds);
     }
 
     #endregion

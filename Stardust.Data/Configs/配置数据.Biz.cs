@@ -50,8 +50,8 @@ public partial class ConfigData : Entity<ConfigData>
         if (!HasDirty) return;
 
         // 这里验证参数范围，建议抛出参数异常，指定参数名，前端用户界面可以捕获参数异常并聚焦到对应的参数输入框
-        if (ConfigId <= 0) throw new ArgumentNullException(nameof(ConfigId), "应用不能为空！");
-        if (Key.IsNullOrEmpty()) throw new ArgumentNullException(nameof(Key), "名称不能为空！");
+        if (ConfigId <= 0) throw new ArgumentNullException(nameof(ConfigId), L.T("Application cannot be empty."));
+        if (Key.IsNullOrEmpty()) throw new ArgumentNullException(nameof(Key), L.T("Name cannot be empty."));
         //if (Scope.IsNullOrEmpty()) throw new ArgumentNullException(nameof(Scope), "作用域不能为空！");
 
         // 建议先调用基类方法，基类方法会做一些统一处理
@@ -78,7 +78,7 @@ public partial class ConfigData : Entity<ConfigData>
             Enable = true,
             Version = 2,
             NewVersion = 2,
-            Remark = "插件服务器。将从该网页上根据关键字分析链接并下载插件",
+            Remark = L.T("Plugin server. Links are analyzed by keyword on this page and plugins are downloaded from it"),
         };
         entity.Insert();
     }

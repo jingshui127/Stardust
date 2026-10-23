@@ -14,8 +14,9 @@ internal class Program
         XTrace.UseConsole();
 
         var asm = Assembly.GetEntryAssembly();
-        Console.WriteLine("星尘发布 \e[31;1mstardeploy\e[0m v{0}", asm.GetName().Version);
-        Console.WriteLine(asm.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description);
+        Console.WriteLine(L.T("Stardust deploy \e[31;1mstardeploy\e[0m v{0}"), asm.GetName().Version);
+        var desc = asm.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description;
+        if (!desc.IsNullOrEmpty()) Console.WriteLine(L.T(desc));
         Console.WriteLine("\e[34;1m{0}\e[0m", Environment.OSVersion);
         Console.WriteLine();
 
@@ -24,7 +25,7 @@ internal class Program
             { "pack", new PackCommand() },
             { "deploy", new DeployCommand() }
         };
-        Console.WriteLine("可用命令：");
+        Console.WriteLine(L.T("Available commands:"));
 
         foreach (var item in cmds)
         {

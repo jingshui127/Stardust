@@ -30,6 +30,10 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     //[Description("调试开关。默认true")]
     //public Boolean Debug { get; set; } = true;
 
+    /// <summary>界面语言。如 zh-Hans、zh-Hant、en、ja，留空时按请求语言识别，Web 之外跟随系统语言</summary>
+    [Description("UI language, for example zh-Hans, zh-Hant, en, or ja; leave empty to detect from each request in web hosts and to follow the system language otherwise")]
+    public String? Language { get; set; }
+
     /// <summary>服务端口。默认6600</summary>
     [Description("服务端口。默认6600")]
     public Int32 Port { get; set; } = 6600;
@@ -78,9 +82,13 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     [Description("监控批统计周期。默认30秒。从数据库聚合修正数据，调小提高修正速度但增加IO压力，调大降低压力但延迟修正")]
     public Int32 MonitorBatchPeriod { get; set; } = 30;
 
-    /// <summary>监控落盘周期。默认60秒。延迟队列批量提交周期，调小加快持久化但增加数据库UPDATE压力（主要瓶颈），调大降低IO但重启时可能丢失数据</summary>
-    [Description("监控落盘周期。默认60秒。延迟队列批量提交周期，调小加快持久化但增加数据库UPDATE压力（主要瓶颈），调大降低IO但重启时可能丢失数据")]
-    public Int32 MonitorSavePeriod { get; set; } = 60;
+    /// <summary>监控落盘周期。默认300秒。统计延迟队列批量提交周期，告警读取内存实时值不受影响，调大显著降低数据库UPDATE压力</summary>
+    [Description("监控落盘周期。默认300秒。统计延迟队列批量提交周期，告警读取内存实时值不受影响，调大显著降低数据库UPDATE压力")]
+    public Int32 MonitorSavePeriod { get; set; } = 300;
+
+    /// <summary>监控巡检周期。默认600秒。非热门应用按周期重算小时/日统计，替代每个批周期的全量重算，降低写放大</summary>
+    [Description("监控巡检周期。默认600秒。非热门应用按周期重算小时/日统计，替代每个批周期的全量重算，降低写放大")]
+    public Int32 MonitorPatrolPeriod { get; set; } = 600;
 
     /// <summary>监控告警周期。默认30秒</summary>
     [Description("监控告警周期。默认30秒")]
@@ -153,6 +161,10 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     /// <summary>dotNet同步地址。抓取.NET运行时版本的官方API地址，支持{major}占位符</summary>
     [Description("dotNet同步地址。抓取.NET运行时版本的官方API地址，支持{major}占位符")]
     public String DotNetSyncUrl { get; set; } = "https://dotnetcli.blob.core.windows.net/dotnet/release-metadata/{major}.0/releases.json";
+
+    /// <summary>星尘资源下载基础地址。StarAgent安装包/一键脚本等资源的基础URL，.NET运行时脚本位于其同级dotnet/目录，默认官方地址</summary>
+    [Description("星尘资源下载基础地址。StarAgent安装包/脚本的基础URL，默认官方地址")]
+    public String AgentDownloadBaseUrl { get; set; } = "https://x.newlifex.com/star/";
 
     ///// <summary>新服务器。节点自动迁移到新的服务器地址</summary>
     //[Description("新服务器。节点自动迁移到新的服务器地址")]

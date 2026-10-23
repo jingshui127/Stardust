@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+﻿using System.Buffers;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
@@ -114,7 +115,7 @@ public class LocalStarClient
         catch (Exception ex)
         {
             // 本地探测失败视为本机未安装或未启动星尘代理，属正常状态，静默返回null
-            Log?.Debug("本地探测失败：{0}", ex.Message);
+            Log?.Debug("Local probe failed: {0}", ex.Message);
             return null;
         }
     }
@@ -170,7 +171,7 @@ public class LocalStarClient
         if (!fileName.IsNullOrEmpty())
         {
             var ext = Path.ChangeExtension(fileName, ".dll");
-            args = Environment.CommandLine.TrimStart(ext).Trim();
+            args = Environment.CommandLine.TrimPrefix(ext).Trim();
         }
 
         // 发起命令
@@ -229,12 +230,12 @@ public class LocalStarClient
                 if (!info.FileName.IsNullOrEmpty()) info.FileName = info.FileName.TrimSuffix(" (deleted)");
                 if (target.IsNullOrEmpty()) target = Path.GetDirectoryName(info.FileName);
 
-                WriteLog("StarAgent在用版本 v{0}，低于目标版本 v{1}", info.Version, version);
+                WriteLog("StarAgent is using version v{0}, which is lower than the target version v{1}", info.Version, version);
             }
         }
         catch (Exception ex)
         {
-            WriteLog("没有探测到StarAgent，{0}", ex.GetTrue()?.Message);
+            WriteLog("StarAgent was not detected, {0}", ex.GetTrue()?.Message);
         }
 
         if (target.IsNullOrEmpty())
@@ -255,7 +256,7 @@ public class LocalStarClient
 
                     if (target.IsNullOrEmpty()) target = Path.GetDirectoryName(p.MainWindowTitle);
 
-                    WriteLog("发现进程StarAgent，ProcessId={0}，target={1}", p.Id, target);
+                    WriteLog("Found StarAgent process, ProcessId={0}, target={1}", p.Id, target);
                 }
             }
             finally
@@ -270,7 +271,7 @@ public class LocalStarClient
             target = target.GetFullPath();
             target.EnsureDirectory(false);
 
-            WriteLog("目标：{0}", target);
+            WriteLog("Target: {0}", target);
 
             var ug = new Upgrade
             {
@@ -280,7 +281,7 @@ public class LocalStarClient
                 Log = XTrace.Log,
             };
 
-            WriteLog("下载：{0}", url);
+            WriteLog("Download: {0}", url);
 
             var client = new HttpClient();
             client.DownloadFileAsync(url, ug.SourceFile).Wait();
@@ -357,7 +358,7 @@ public class LocalStarClient
             Process.Start(fileName, "-stop").WaitForExit(5_000);
             Process.Start(fileName, "-start").WaitForExit(5_000);
 
-            WriteLog("启动服务成功");
+            WriteLog("Service started successfully.");
         }
         else
         {
@@ -368,7 +369,7 @@ public class LocalStarClient
             };
             var p = Process.Start(si);
 
-            WriteLog("启动进程成功 pid={0}", p?.Id);
+            WriteLog("Process started successfully, pid={0}", p?.Id);
         }
 
         return true;
@@ -390,7 +391,7 @@ public class LocalStarClient
             Process.Start(fileName, "-stop").WaitForExit(5_000);
             Process.Start(fileName, "-start").WaitForExit(5_000);
 
-            WriteLog("启动服务成功");
+            WriteLog("Service started successfully.");
         }
         else
         {
@@ -401,7 +402,7 @@ public class LocalStarClient
             };
             var p = Process.Start(si);
 
-            WriteLog("启动进程成功 pid={0}", p?.Id);
+            WriteLog("Process started successfully, pid={0}", p?.Id);
         }
 
         return true;
@@ -419,7 +420,7 @@ public class LocalStarClient
             Process.Start("dotnet", $"{fileName} -stop").WaitForExit(5_000);
             Process.Start("dotnet", $"{fileName} -start").WaitForExit(5_000);
 
-            WriteLog("启动服务成功");
+            WriteLog("Service started successfully.");
         }
         else
         {
@@ -430,7 +431,7 @@ public class LocalStarClient
             };
             var p = Process.Start(si);
 
-            WriteLog("启动进程成功 pid={0}", p?.Id);
+            WriteLog("Process started successfully, pid={0}", p?.Id);
         }
 
         return true;
@@ -513,10 +514,17 @@ public class LocalStarClient
         //};
         //var buf = msg.ToPacket().ToArray();
 
-        var pk = encoder.CreateRequest("Info", null).ToPacket();
-        if (pk == null) yield break;
+        var codec = new SrmpCodec();
 
-        var buf = pk.ToArray();
+        var req = encoder.CreateRequest("Info", null);
+        var frame = codec.Build(req);
+        if (frame == null) yield break;
+
+        var buf = frame.ToArray();
+
+        // 帧字节已复制，归还帧与请求消息持有的池化缓冲
+        frame.Dispose();
+        req.Dispose();
 
         // 在局域网中广播消息
         var udp = new UdpClient();
@@ -525,11 +533,13 @@ public class LocalStarClient
         var end = DateTime.Now.AddSeconds(timeout);
         while (DateTime.Now < end)
         {
-            var rs = new DefaultMessage();
             IPEndPoint? ep = null;
             buf = udp.Receive(ref ep);
-            if (buf != null && rs.Read((ArrayPacket)buf))
+            if (buf != null && codec.TryParse(new ReadOnlySequence<Byte>(buf)) is { } pr && pr.Message is DefaultMessage rs)
             {
+                // v12 帧解析只产出头部，消息体由帧层绑定；裸 UdpClient 收到的单个数据报即完整帧
+                rs.SetBody(new ArrayPacket(buf, pr.HeaderSize, (Int32)pr.BodyLength));
+
                 var msg = encoder.Decode(rs);
                 if (msg != null && msg.Data != null)
                 {

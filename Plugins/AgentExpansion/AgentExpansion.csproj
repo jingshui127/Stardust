@@ -1,9 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFrameworks>net45;netstandard2.0</TargetFrameworks>
-    <AssemblyTitle>代理扩展</AssemblyTitle>
-    <Description>星尘代理局域网扩展，探测节点并自动安装StarAgent</Description>
+    <AssemblyTitle>Agent expansion</AssemblyTitle>
+    <Description>LAN extension for the Stardust agent that discovers nodes and installs StarAgent automatically.</Description>
     <Company>新生命开发团队</Company>
     <Copyright>©2002-2026 NewLife</Copyright>
     <VersionPrefix>1.0</VersionPrefix>
@@ -34,7 +34,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.Remoting" Version="3.9.2026.901" />
+    <PackageReference Include="NewLife.Remoting" Version="3.9.2026.1019-beta1013" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
   </ItemGroup>
 
 </Project>

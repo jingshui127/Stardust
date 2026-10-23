@@ -79,17 +79,17 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
 
         // 检查黑白名单
         if (!app.MatchIp(ip))
-            throw new ApiException(ApiCode.Forbidden, $"应用[{app.Name}]禁止{ip}访问！");
+            throw new ApiException(ApiCode.Forbidden, L.T("Application [{0}] forbids access from {1}.", app.Name, ip));
         if (app.Project != null && !app.Project.MatchIp(ip))
-            throw new ApiException(ApiCode.Forbidden, $"项目[{app.Project}]禁止{ip}访问！");
+            throw new ApiException(ApiCode.Forbidden, L.T("Project [{0}] forbids access from {1}.", app.Project, ip));
 
         // 检查应用有效性
-        if (!app.Enable) throw new ApiException(ApiCode.Forbidden, $"应用[{app.Name}]已禁用！");
+        if (!app.Enable) throw new ApiException(ApiCode.Forbidden, L.T("Application [{0}] is disabled.", app.Name));
 
         // 安全治理：禁止空密钥应用匿名登录（认证绕过）。空密钥应用需在注册中心设置密钥，或临时开启"允许重新注册"自动收敛
         if (app.Secret.IsNullOrEmpty())
         {
-            app.WriteHistory("应用鉴权", false, "空密钥应用禁止登录！请在注册中心为该应用设置Secret或开启允许重新注册", null, ip, context.ClientId);
+            app.WriteHistory(L.T("Application authentication"), false, L.T("An application with an empty secret cannot log in. Set a Secret for this application in the registry or enable re-registration."), null, ip, context.ClientId);
             return false;
         }
         if (app.Secret.EqualIgnoreCase(request.Secret)) return true;
@@ -101,7 +101,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         }
         if (request.Secret.IsNullOrEmpty() || !_passwordProvider.Verify(app.Secret, request.Secret))
         {
-            app.WriteHistory("应用鉴权", false, "密钥校验失败", null, ip, context.ClientId);
+            app.WriteHistory(L.T("Application authentication"), false, L.T("Secret validation failed."), null, ip, context.ClientId);
             return false;
         }
 
@@ -122,6 +122,9 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         App app = null;
         try
         {
+            // 空应用标识直接拒绝：GetOrAdd 内部对空键直接解引用，会以 NRE 形式返回 500
+            if (name.IsNullOrEmpty()) throw new ApiException(ApiCode.BadRequest, L.T("Application identifier cannot be empty."));
+
             // 查找应用。若已存在，说明客户端密钥校验失败（错误或为空）后被框架转入动态注册流程。
             // 默认禁止复用旧身份自动放行，防止身份冒用与真实密钥泄露（安全扫描 V-1）
             app = App.FindByName(name);
@@ -130,12 +133,14 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
                 // 按重注册模式放行：Off=拒绝；Auto=收敛窗口；Trusted=可信接入（同项目节点/近期指纹）；Open=开放
                 var mode = app.ReRegister;
                 if (mode == ReRegisterModes.Off || (mode == ReRegisterModes.Trusted && !IsTrustedClient(app, request)))
-                    throw new ApiException(ApiCode.Forbidden, $"应用[{name}]已存在，禁止动态注册复用旧身份！请检查密钥或联系管理员；如需新增实例自动接入，请调整该应用重注册模式（收敛窗口/可信接入/开放）");
+                    throw new ApiException(ApiCode.Forbidden, L.T("Application [{0}] already exists; reusing the old identity for dynamic registration is forbidden. Check the secret or contact the administrator. To enable automatic instance onboarding, adjust the application's re-registration mode (convergence window/trusted access/open).", name));
 
                 var model = request as AppModel;
-                var remark = $"[{app.Name}]按[{app.ReRegister}]模式重新注册，密钥已下发";
-                if (model != null && !model.UUID.IsNullOrEmpty()) remark += $"，UUID={model.UUID}";
-                app.WriteHistory("应用重注册", true, remark, null, context.UserHost, context.ClientId);
+                var uuid = (model != null && !model.UUID.IsNullOrEmpty()) ? model.UUID : null;
+                var remark = uuid == null
+                    ? L.T("[{0}] re-registered in [{1}] mode; secret issued", app.Name, app.ReRegister)
+                    : L.T("[{0}] re-registered in [{1}] mode; secret issued, UUID={2}", app.Name, app.ReRegister, uuid);
+                app.WriteHistory(L.T("Application re-registered"), true, remark, null, context.UserHost, context.ClientId);
                 context.Device = app;
 
                 return app;
@@ -149,14 +154,14 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
                 Enable = _setting.AppAutoRegister,
             });
 
-            app.WriteHistory("应用注册", true, $"[{app.Name}]注册成功", null, context.UserHost, context.ClientId);
+            app.WriteHistory(L.T("Application registered"), true, L.T("[{0}] registered successfully.", app.Name), null, context.UserHost, context.ClientId);
             context.Device = app;
         }
         catch (Exception ex)
         {
             span?.SetError(ex, null);
 
-            app?.WriteHistory("应用注册", false, $"[{app.Name}]注册失败！" + ex.Message, null, context.UserHost, context.ClientId);
+            app?.WriteHistory(L.T("Application registered"), false, L.T("[{0}] registration failed: {1}", app.Name, ex.Message), null, context.UserHost, context.ClientId);
 
             throw;
         }
@@ -178,7 +183,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
             var node = Node.FindByCode(inf.NodeCode);
             if (node != null && node.Enable && (app.ProjectId <= 0 || node.ProjectId == app.ProjectId))
             {
-                XTrace.WriteLine("应用[{0}]可信接入：命中同项目节点[{1}]，IP={2}", app, node, inf.IP);
+                XTrace.WriteLine("Trusted access for application [{0}]: matched node [{1}] in the same project, IP={2}", app, node, inf.IP);
                 return true;
             }
         }
@@ -199,7 +204,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         {
             if (AppOnline.IsRecentFingerprint(app.Id, inf.UUID, inf.Macs))
             {
-                XTrace.WriteLine("应用[{0}]可信接入：命中在线指纹 UUID={1}，IP={2}", app, inf.UUID, inf.IP);
+                XTrace.WriteLine("Trusted access for application [{0}]: matched online fingerprint UUID={1}, IP={2}", app, inf.UUID, inf.IP);
                 return true;
             }
         }
@@ -268,7 +273,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         }
 
         // 登录历史
-        WriteHistory(context, "应用鉴权", true, $"[{app.DisplayName}/{app.Name}]鉴权成功 " + model.ToJson(false, false, false));
+        WriteHistory(context, L.T("Application authentication"), true, L.T("[{0}/{1}] authenticated {2}", app.DisplayName, app.Name, model.ToJson(false, false, false)));
 
         // 检查应用上线恢复
         OnlineService.CheckOnline(app);
@@ -335,7 +340,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
             services.Add(svc);
 
             changed = true;
-            WriteHistory(app, "RegisterService", true, $"注册服务[{model.ServiceName}] {model.ClientId}", ip, clientId);
+            WriteHistory(app, "RegisterService", true, L.T("Registered service [{0}] {1}", model.ServiceName, model.ClientId), ip, clientId);
         }
         else
         {
@@ -441,6 +446,8 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         return (svc, changed);
     }
 
+    /// <summary>服务健康检查。按服务的健康检测地址探测一次，并更新服务的健康状态</summary>
+    /// <param name="svc">应用服务实例</param>
     public async Task HealthCheck(AppService svc)
     {
         var url = svc.Service?.HealthAddress;
@@ -499,7 +506,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
             services.Remove(svc);
 
             changed = true;
-            WriteHistory(app, "UnregisterService", true, $"服务[{model.ServiceName}]下线 {svc.Client}", ip, svc.Client);
+            WriteHistory(app, "UnregisterService", true, L.T("Service [{0}] went offline: {1}", model.ServiceName, svc.Client), ip, svc.Client);
         }
 
         info.Providers = services.Count;
@@ -635,7 +642,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
     /// <returns></returns>
     public async Task<CommandReplyModel> SendCommand(App app, String clientId, CommandInModel model, String user, CancellationToken cancellationToken = default)
     {
-        //if (model.Code.IsNullOrEmpty()) throw new ArgumentNullException(nameof(model.Code), "必须指定应用");
+        //if (model.Code.IsNullOrEmpty()) throw new ArgumentNullException(nameof(model.Code), L.T("Application must be specified."));
         if (model.Command.IsNullOrEmpty()) throw new ArgumentNullException(nameof(model.Command));
 
         var cmd = new AppCommand
@@ -665,13 +672,19 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
             ts.Add(_sessionManager.PublishAsync(code, cmdModel, null, model.Timeout, cancellationToken));
         }
 
-        // 目标应用没有任何在线实例（离线），无法下发命令，直接返回空，避免 await null 抛空引用异常
+        // 目标应用没有任何在线实例（离线），无法下发命令，直接返回空，避免等待空任务抛空引用异常
         if (ts.Count == 0) return null;
 
         await Task.WhenAll(ts);
 
-        // SessionManager.PublishAsync 内置timeout等待，取首个非空响应
-        return await ts.FirstOrDefault(t => t.Result != null);
+        // SessionManager.PublishAsync 内置timeout等待，取首个非空响应。
+        // 即发即忘（timeout<=0）时所有任务结果均为空，FirstOrDefault 会返回空任务，不能直接 await
+        foreach (var item in ts)
+        {
+            if (item.Result != null) return item.Result;
+        }
+
+        return null;
     }
 
     public override Task<CommandReplyModel?> SendCommand(DeviceContext context, CommandInModel model, CancellationToken cancellationToken = default)
@@ -688,7 +701,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         if (cmd == null) return 0;
 
         // 防止越权
-        if (cmd.AppId != app.Id) throw new ApiException(ApiCode.Forbidden, $"[{app}]越权访问[{cmd.AppName}]的服务");
+        if (cmd.AppId != app.Id) throw new ApiException(ApiCode.Forbidden, L.T("[{0}] attempted to access the service of [{1}] without permission", app, cmd.AppName));
 
         cmd.Status = model.Status;
         cmd.Result = model.Data;

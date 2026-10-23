@@ -31,11 +31,11 @@ public partial class GatewayRoute : Entity<GatewayRoute>
 
         base.Valid(isNew);
 
-        if (Name.IsNullOrEmpty()) throw new ArgumentNullException(nameof(Name), "名称不能为空！");
+        if (Name.IsNullOrEmpty()) throw new ArgumentNullException(nameof(Name), L.T("Name cannot be empty."));
 
         // 开启了静态文件路由必须设置StaticRoot
         if (IsStaticRoute && StaticRoot.IsNullOrEmpty())
-            throw new InvalidOperationException("开启静态文件路由后，静态文件根目录(StaticRoot)不能为空！");
+            throw new InvalidOperationException(L.T("When static file routing is enabled, the static file root directory (StaticRoot) cannot be empty."));
     }
     #endregion
 
@@ -173,7 +173,7 @@ public partial class GatewayRoute : Entity<GatewayRoute>
             // 前缀匹配 /api/*
             if (p.EndsWith("/*"))
             {
-                var prefix = p.TrimEnd("/*");
+                var prefix = p.TrimSuffix("/*");
                 if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return true;
                 continue;
             }
@@ -253,7 +253,7 @@ public partial class GatewayRoute : Entity<GatewayRoute>
 
             if (p.EndsWith("/*"))
             {
-                var prefix = p.TrimEnd("/*");
+                var prefix = p.TrimSuffix("/*");
                 if (path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
                     return "/" + path.Substring(prefix.Length).TrimStart('/');
             }

@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFrameworks>netstandard2.1</TargetFrameworks>
     <AssemblyTitle>Stardust Data</AssemblyTitle>
-    <Description>星尘分布式服务框架数据层。基于XCode ORM的实体模型定义与统计任务，支持节点管理、应用管理、配置中心、注册中心、监控中心、发布中心等业务数据持久化与计算，兼容多种数据库。</Description>
+    <Description>Data layer of the Stardust distributed service framework. Defines entity models and statistics jobs based on XCode ORM, supporting persistence and computation for node management, application management, configuration center, registry, monitoring center, and release center, compatible with multiple databases.</Description>
     <Company>新生命开发团队</Company>
     <Copyright>©2002-2026 NewLife</Copyright>
     <VersionPrefix>2.0</VersionPrefix>
@@ -41,11 +41,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.XCode" Version="12.2.2026.912-beta0916" />
+    <PackageReference Include="NewLife.XCode" Version="12.2.2026.1020-beta1559" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Stardust\Stardust.csproj" />
   </ItemGroup>
-
+  <ItemGroup>
+    <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
+  </ItemGroup>
 </Project>

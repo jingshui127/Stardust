@@ -197,11 +197,13 @@ nodeService.Upgrade(ctx, channel)
 ```
 登录或心跳中触发：
 CheckDotNet(node, baseUri, ip)
-    ├─ DotNetPackage.Match(node)                     ← 匹配 OS/Kind/Runtime
-    ├─ OS 兼容性检查（Ubuntu18 不支持 .NET10）
-    ├─ GLIBC 版本检查（.NET10 要求 glibc 2.27+）
+    ├─ NodeVersion 策略匹配（ProductCode=dotNet、启用、Match(node)）
+    ├─ 节流去重（nodeNet: 缓存 600 秒，避免重复推送）
     └─ 推送 "framework/install" 命令 → SendCommand
 ```
+
+> DotNetPackage 安装包表只服务手工推送（节点框架页批量安装、框架推荐），不参与自动推送。
+> 手工推送时版本可留空或选"自动（最新）"，按节点自动匹配最新启用包，并做操作系统与 GLIBC 兼容性检查，不兼容的节点跳过并回报原因。
 
 ### 3.6 DDNS 动态域名解析（节点特有）
 

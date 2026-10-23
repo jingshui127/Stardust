@@ -29,8 +29,11 @@ public class TraceController(ITraceStatService stat, IAppDayStatService appStat,
     [HttpPost(nameof(Report))]
     public TraceResponse Report([FromBody] TraceModel model, String token)
     {
-        var builders = model?.Builders;
-        if (model == null || model.AppId.IsNullOrEmpty()) return null;
+        // 报文解析失败时明确报错，避免整份埋点数据被静默丢弃（时间字段必须为 Unix 毫秒数值）
+        if (model == null) throw new ApiException(ApiCode.BadRequest, L.T("Failed to parse the tracing payload. Check field types: StartTime/EndTime must be Unix millisecond values."));
+
+        var builders = model.Builders;
+        if (model.AppId.IsNullOrEmpty()) return null;
 
         var ip = HttpContext.GetUserHost();
         if (ip.IsNullOrEmpty()) ip = ManageProvider.UserHost;
@@ -109,11 +112,11 @@ public class TraceController(ITraceStatService stat, IAppDayStatService appStat,
             if (ex != null) throw ex;
 
             var ap1 = App.FindByName(jwt?.Subject);
-            if (ap1 == null || !ap1.Enable) throw new ApiException(ApiCode.Unauthorized, "无效应用令牌");
+            if (ap1 == null || !ap1.Enable) throw new ApiException(ApiCode.Unauthorized, L.T("Invalid application token"));
 
             // 安全V-9：令牌主体必须与上报应用一致，防止冒名向其它应用灌数据
             if (!appId.IsNullOrEmpty() && !appId.EqualIgnoreCase(ap1.Name))
-                throw new ApiException(ApiCode.Forbidden, $"令牌主体[{ap1.Name}]与上报应用[{appId}]不一致！");
+                throw new ApiException(ApiCode.Forbidden, L.T("Token subject [{0}] does not match the reporting application [{1}].", ap1.Name, appId));
 
             if (appId.IsNullOrEmpty()) appId = ap1.Name;
             if (clientId.IsNullOrEmpty()) clientId = jwt.Id;
@@ -122,7 +125,7 @@ public class TraceController(ITraceStatService stat, IAppDayStatService appStat,
         }
         // 匿名上报仅用于多级级联（下级StarServer转发）或未配置密钥的极简SDK，默认关闭（安全V-9）
         else if (!setting.AnonymousReport)
-            throw new ApiException(ApiCode.Unauthorized, "未提供有效令牌，禁止匿名上报！可在StarServer设置AnonymousReport开启多级级联");
+            throw new ApiException(ApiCode.Unauthorized, L.T("No valid token provided; anonymous reporting is forbidden. Enable AnonymousReport in StarServer to allow multi-level cascading."));
 
         //ap = _tokenService.Authorize(appId, null, set.AutoRegister);
         ap ??= App.FindByName(model.AppId);
@@ -193,7 +196,7 @@ public class TraceController(ITraceStatService stat, IAppDayStatService appStat,
         if (app.EnableMeter) App.WriteMeter(model, ip, online?.NodeId ?? 0);
 
         // 检查应用有效性
-        if (!app.Enable) throw new ArgumentOutOfRangeException(nameof(appId), $"应用[{appId}]已禁用！");
+        if (!app.Enable) throw new ArgumentOutOfRangeException(nameof(appId), L.T("Application [{0}] is disabled.", appId));
 
         return (app, online);
     }

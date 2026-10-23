@@ -36,6 +36,12 @@ public static class StarFactoryExtensions
     /// <param name="appId">应用标识。为空时读取star.config，初始值为入口程序集名称</param>
     /// <param name="secret">应用密钥。为空时读取star.config，初始值为空</param>
     /// <returns></returns>
+    /// <remarks>
+    /// <para>ASP.NET Core 应用通常只需在 Program 中调用 <c>builder.Services.AddStardust("AppId")</c> 一行：
+    /// 注册星尘客户端、自动注入追踪中间件，并在主机启动时解析 <see cref="ITracer"/>，
+    /// 由 <c>StarTracer.AttachGlobal</c> 完成 HttpClient、WebApi、数据库、Redis 等组件的自动埋点。</para>
+    /// <para>需要自定义中间件顺序时，仍可显式调用 <c>app.UseStardust()</c>；重复调用是幂等的。</para>
+    /// </remarks>
     public static StarFactory AddStardust(this IServiceCollection services, String? server = null, String? appId = null, String? secret = null)
     {
         var star = new StarFactory(server, appId, secret);
@@ -84,10 +90,15 @@ public static class StarFactoryExtensions
         NewLife.Model.ObjectContainer.SetInnerProvider(() => services.BuildServiceProvider());
         services.AddSingleton<IStartupFilter, ObjectContainerBridgeStartupFilter>();
 
+        // 一行接入：Web 主机启动时自动注入追踪中间件；解析 ITracer 会触发 StarTracer.AttachGlobal，
+        // 从而启用 HttpClient/WebApi/数据库/Redis 等组件的自动埋点。显式 UseStardust 仍然幂等可用。
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IStartupFilter, StartupFilter>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IHostedService, StardustTracerHostedService>());
+
         return star;
     }
 
-    /// <summary>使用星尘，注入跟踪中间件。不需要跟魔方一起使用</summary>
+    /// <summary>使用星尘，注入跟踪中间件。AddStardust 已自动注入，通常无需调用；需要自定义中间件顺序时使用。</summary>
     /// <param name="app"></param>
     /// <returns></returns>
     public static IApplicationBuilder UseStardust(this IApplicationBuilder app)
@@ -136,7 +147,7 @@ public static class StarFactoryExtensions
     public static IApplicationBuilder RegisterService(this IApplicationBuilder app, String serviceName, String? address = null, String? tag = null, String? health = null)
     {
         var star = app.ApplicationServices.GetRequiredService<StarFactory>();
-        if (star == null) throw new InvalidOperationException("未注册StarFactory，需要AddStardust注册。");
+        if (star == null) throw new InvalidOperationException(L.T("StarFactory is not registered; call AddStardust to register."));
 
         if (serviceName.IsNullOrEmpty()) serviceName = AssemblyX.Entry?.Name!;
 
@@ -165,7 +176,7 @@ public static class StarFactoryExtensions
 
                     if (address.IsNullOrEmpty())
                     {
-                        if (feature == null) throw new Exception("尘埃客户端未能取得本地服务地址。");
+                        if (feature == null) throw new Exception(L.T("The dust client failed to obtain the local service address."));
 
                         star.Service?.Register(serviceName, () => feature?.Addresses.Join(","), tag, health);
 

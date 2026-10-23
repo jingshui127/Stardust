@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <TargetFrameworks>net45;netstandard2.0</TargetFrameworks>
-    <AssemblyTitle>网络监测</AssemblyTitle>
-    <Description>检测网络，如果长期不可用，则重启系统，主要应用于嵌入式工控机</Description>
+    <AssemblyTitle>Network detect</AssemblyTitle>
+    <Description>Detects network availability and restarts the system after prolonged downtime, mainly for embedded industrial PCs.</Description>
     <Company>新生命开发团队</Company>
     <Copyright>©2002-2026 NewLife</Copyright>
     <VersionPrefix>1.0</VersionPrefix>
@@ -21,6 +21,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Stardust\Stardust.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
+    <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
   </ItemGroup>
 
 </Project>

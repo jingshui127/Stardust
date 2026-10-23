@@ -46,7 +46,7 @@ public partial class Node : Entity<Node>, IDeviceModel2, ILogProvider
         // 如果没有脏数据，则不需要进行任何处理
         if (!HasDirty) return;
 
-        if (Name.IsNullOrEmpty()) throw new ArgumentNullException(__.Name, _.Name.DisplayName + "不能为空！");
+        if (Name.IsNullOrEmpty()) throw new ArgumentNullException(__.Name, _.Name.DisplayName + L.T("Cannot be empty."));
 
         this.TrimExtraLong(__.Uuid, __.MachineGuid, __.MACs, __.DiskID, __.SerialNumber, __.OS, __.DriveInfo);
         this.TrimExtraLong(__.Framework, __.Frameworks, __.CLibVersion, __.IP);
@@ -789,7 +789,7 @@ public partial class Node : Entity<Node>, IDeviceModel2, ILogProvider
         Domains = newDomains;
         Save();
 
-        WriteHistory("修改域名", true, $"域名变更：{oldDomains} -> {newDomains}", ip);
+        WriteHistory(L.T("Domain changed"), true, L.T("Domains changed: {0} -> {1}", oldDomains, newDomains), ip);
     }
 
     /// <summary>创建在线对象</summary>

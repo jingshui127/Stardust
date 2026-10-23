@@ -10,6 +10,7 @@ using XCode.Membership;
 
 namespace Stardust.Web.Areas.Monitors.Controllers;
 
+/// <summary>埋点项。每个应用各自的埋点名清单，用于配置采样率、超时与告警</summary>
 [Menu(65, false)]
 [MonitorsArea]
 public class TraceItemController : EntityController<TraceItem>
@@ -80,7 +81,7 @@ public class TraceItemController : EntityController<TraceItem>
             var ti = TraceItem.FindById(item.ToInt());
             if (ti != null)
             {
-                XTrace.WriteLine("修正 {0}/{1}", ti.Name, ti.Id);
+                XTrace.WriteLine("Correcting {0}/{1}", ti.Name, ti.Id);
 
                 {
                     var list = TraceDayStat.FindAllByAppAndItem(ti.AppId, ti.Id);
@@ -117,7 +118,7 @@ public class TraceItemController : EntityController<TraceItem>
                             var rule = rules.FirstOrDefault(e => e.Rule.IsMatch(name, StringComparison.OrdinalIgnoreCase));
                             if (rule != null)
                             {
-                                XTrace.WriteLine("修正显示 {0}/{1}", ti.Name, ti.Id);
+                                XTrace.WriteLine("Correcting display {0}/{1}", ti.Name, ti.Id);
 
                                 var dis = !rule.Name.IsNullOrEmpty() ? rule.Name : rule.Category;
 
