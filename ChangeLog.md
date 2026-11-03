@@ -54,6 +54,10 @@
 - 依赖升级至 NewLife 2026.10.24 正式版（替代 10-21 beta0321）；合入 Linux 主机 OS 类型误判与跨用户进程句柄采集修复、全新库网关集群级联删除缺表修复、MVC 界面元数据词表工具链
 - 冲突处理：StarAgent.csproj 取上游 NewLife.Agent 10.18.2026.1024 并保留 Costura/品牌化；ChangeLog 双方版本段落按时间序并存；机器指纹可信门验证保留
 - StarAgent net461 单文件产物验证：0 dll、科控 logo 图标正常，`staragent461.zip` 已同步重打
+- 部署经验（已固化至全局 skill `stardust-upgrade`）：
+  - **MSBuild 包升级陷阱**：csproj 升 NuGet 版本后增量 build 不覆盖输出目录旧 dll，Costura 可能嵌入旧版且时间戳更新造成假象；必须 clean 核心库 + 删除输出目录旧 NewLife*.dll 再重建，产物按文件大小核对（NewLife.Core 1024 版 net8=1754624 / net10=1755136）
+  - **进程名陷阱**：本机生产应用由 Agent 以 `dotnet StarServer.dll` 方式拉起（进程名 dotnet.exe），部署时按 CommandLine 匹配杀残留，taskkill /IM 应用名无效；本次顺带清掉遗留的 StarServer/StarWeb 双实例
+  - 部署后验证：Agent 日志"节点登录成功"+"App登录成功"+上报应用服务，6600/6680 HTTP 200，冷启动 30 秒内登录超时属正常
 
 ## v3.10.2026.1023 (2026-10-23)
 
