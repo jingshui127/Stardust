@@ -47,7 +47,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.Agent" Version="10.17.2026.1021-beta0235" />
+    <PackageReference Include="NewLife.Agent" Version="10.18.2026.1024" />
     <!--
       Costura.Fody：把托管依赖程序集嵌入 exe，net45/net461 目标产出单文件可执行。
       仅 .NET Framework 运行时支持从嵌入资源解析程序集；net6+ 走官方单文件发布，Costura 对 CoreCLR 模块自动跳过。
