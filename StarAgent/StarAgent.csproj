@@ -3,10 +3,10 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFrameworks>net45;net461;net6.0;net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
-    <AssemblyTitle>Stardust agent</AssemblyTitle>
-    <Description>Node guardian agent for Stardust. Deployed on every application server or edge node, providing process supervision, remote deployment, performance metrics collection (CPU/memory/disk/network/GPU), log and metric reporting, and supporting Windows services, Linux systemd, and IoT edge environments.</Description>
-    <Company>新生命开发团队</Company>
-    <Copyright>©2002-2026 NewLife</Copyright>
+    <AssemblyTitle>进程守护</AssemblyTitle>
+    <Description>持续监控你的应用，如果应用崩溃、卡顿或停止，会自动重启。它非常适合让非服务应用在后台运行，并确保它们在系统启动时自动启动，甚至在登录前就启动，无需重写为服务。QQ:2492123056</Description>
+    <Company>科控物联</Company>
+    <Copyright>©2002-2026 TC</Copyright>
     <VersionPrefix>3.7</VersionPrefix>
     <VersionSuffix>$([System.DateTime]::Now.ToString(`yyyy.MMdd`))</VersionSuffix>
     <Version>$(VersionPrefix).$(VersionSuffix)</Version>
@@ -18,6 +18,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 科控物联品牌化图标（仓库根 favicon.ico，源自品牌化基线 9992c232） -->
+    <ApplicationIcon>..\favicon.ico</ApplicationIcon>
     <SignAssembly>True</SignAssembly>
     <AssemblyOriginatorKeyFile>..\Doc\newlife.snk</AssemblyOriginatorKeyFile>
     <IsPackable>False</IsPackable>
@@ -46,6 +48,16 @@
 
   <ItemGroup>
     <PackageReference Include="NewLife.Agent" Version="10.17.2026.1021-beta0235" />
+    <!--
+      Costura.Fody：把托管依赖程序集嵌入 exe，net45/net461 目标产出单文件可执行。
+      仅 .NET Framework 运行时支持从嵌入资源解析程序集；net6+ 走官方单文件发布，Costura 对 CoreCLR 模块自动跳过。
+    -->
+    <PackageReference Include="Costura.Fody" Version="6.2.0">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Fody" Version="6.9.3">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
   </ItemGroup>
 
   <ItemGroup>
@@ -55,4 +67,17 @@
     <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
     <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
   </ItemGroup>
+
+  <!--
+    Costura 已把依赖程序集嵌入 exe，.NET Framework 目标（net45/net461）发布目录只保留 exe/配置/符号文件。
+    注意：仅对 Framework 目标清理；net6+ 目标 Costura 跳过，dll 必须保留。
+  -->
+  <Target Name="CleanEmbeddedAssemblies" AfterTargets="Build" Condition="('$(TargetFramework)'=='net45' Or '$(TargetFramework)'=='net461') And '$(Configuration)'=='Release'">
+    <ItemGroup>
+      <LeftoverDlls Include="$(OutDir)*.dll" />
+      <LeftoverPdbs Include="$(OutDir)*.pdb" Exclude="$(TargetDir)$(TargetName).pdb" />
+    </ItemGroup>
+    <Delete Files="@(LeftoverDlls)" ContinueOnError="true" />
+    <Message Importance="high" Text="已清理嵌入后的依赖程序集：@(LeftoverDlls->Count()) 个" />
+  </Target>
 </Project>

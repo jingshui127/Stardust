@@ -1,5 +1,32 @@
 # 星尘（Stardust）版本历史
 
+## v3.10.2026.1023 (2026-10-23)
+
+### 上游同步（合并 130 提交，9-03 至 10-21）
+- **依赖升级**：NewLife.Core 升级至 v12（2026.1021-beta0321），XCode/Remoting 系列同步升级；解决方案文件从 `星尘.sln` 迁移至 `星尘.slnx`
+- **官方修复跟进**：`SendCommand` 即发即忘空引用（命令超时/无响应时抛异常）、AppOnline 超长 Macs 截断、应用登录参数错误与脏会话 500、重注册窗口改为长期无活动才兜底关闭、令牌/配置/网关接口支持重注册模式
+- **新特性合入**：全平台多语言体系（31 种语言，面板资源内嵌 dll）、OpenTelemetry 集成、移动端代理与 Rust/C++/Go 原生 Agent
+
+### 本地增强（合并时保留）
+- **机器指纹可信门**：`Node.FindByFingerprint`（UUID/MAC 匹配受管节点）+ `RegistryService.IsTrustedClient` 第三道可信门——官方未实现该逻辑，为本地独有补丁，**下次合并必须保留**
+- 解决旧版 Agent 不上报 NodeCode 导致可信接入失败的问题；配合服务端还原原始密钥，全国旧设备无需现场升级即可恢复接入
+
+### StarAgent 单文件发布
+- **品牌化恢复**：csproj 的 AssemblyTitle/Company/Copyright/ApplicationIcon 曾在上游同步中丢失（工作区未提交修改被冲掉），已从品牌化基线 `9992c232` 恢复——公司=科控物联、图标=`..\favicon.ico`（紫色设备互联 logo，基线 1575 字节原文件）。注意：10-05 线上版 exe 实际无 logo（默认文档图标），本次构建产物首次在资源管理器中正确显示科控 logo
+- **Costura.Fody 嵌入**：net45/net461 目标接入 Costura.Fody 6.2.0 + Fody 6.9.3（参照 RDPPlus 项目方案），产出单文件 exe（net461 约 4.5MB，依赖 dll 全部嵌入）。品牌化基线曾使用 ILRepack 打包（同样来自 9992c232，后于同步中被精简），本次以 Costura 替代，无需 targets 文件
+- **部署惯例**：StarAgent 可执行文件按现场惯例同时提供 `StarAgent.exe` 与 `Agent.exe`（改名副本），Windows 服务 binPath 使用 `E:\StarAgent\Agent.exe -s`；`Bin\Agent\staragent461.zip` 为 net461 单文件分发包
+- **清理 Target**：`CleanEmbeddedAssemblies` 仅对 net45/net461 删除依赖 dll；net6+ 目标 Costura 自动跳过 CoreCLR，产物不受影响
+- **平台限制备忘**：SDK 的 `PublishSingleFile` 对 .NET Framework 目标无效，Framework 单文件必须走 Costura；net8.0 发布需显式 `-f net8.0 -r win-x64 -p:PublishSingleFile=true`
+- **兼容面决策**：保持 `net45;net461` 不引入 net472——Framework 程序向下构建向上运行，net461 覆盖 net472 全部场景并兼容更老系统（Win10 1511/1607、Win8.1、Win7），面向无法现场维护的旧设备兼容面优先
+
+### 运维与部署
+- **v12 三件套部署生产**：`E:\StarServer`、`E:\StarWeb`、`E:\StarAgent`（备份 `E:\*.bak_20261023`），Config/Plugins/Data 目录保留不动
+- **Windows 服务修复**：StarAgent 服务 binPath 原指向不存在的 `Agent.exe` 导致自启失败，已修正为 `E:\StarAgent\StarAgent.exe -s`；服务失败恢复策略已清除，崩溃后需手动 `Start-Service`
+- **双实例教训**：控制台+服务模式两个 StarAgent 并存会互判服务退出、各自拉起形成重启风暴（曾累积 150+ 进程）；管理唯一入口 `services.msc`，禁止手动双开
+- **替换被锁文件技巧**：服务会话进程 `Stop-Process` 可能静默失败需用 `taskkill /F` 并二次确认；被 SCM 映像句柄锁住的 exe 可先 `Rename-Item` 改名绕过再复制
+
+---
+
 ## v3.10.2026.0901 (2026-09-01)
 
 ### MCP 能力增强
