@@ -1,5 +1,20 @@
 # 星尘（Stardust）版本历史
 
+## v3.10.2026.1112-beta (2026-11-12)
+
+### 上游同步（合并 237 提交，10-28 至 11-11）
+- **升级链路大改造**：升级互斥防并发覆盖安装目录、升级自愈（新进程启动清理旧版升级残局）、升级改用包指纹判定并按失败退避重试（修复已升级节点被反复重推）、强制升级冒烟通过即确认、升级失败回滚旧版且保持代理在线、Linux apphost 升级自愈改用 dotnet 启动入口
+- **StarAgent 增强**：全面支持 NativeAOT（`-p:StarAgentAot=true`，net10）、无 ICU 系统可启动（Invariant Globalization 由 runtimeconfig 控制）、Web 面板接入操作系统账号认证与 TLS 配置、面板密钥只写不读并隐藏安全设置
+- **多语言深化**：平台设置新增默认语言并随登录心跳下发、支持独立日志语言、无语言声明请求回退平台默认语言、清空默认语言下发 auto 通知客户端恢复系统语言
+- **控制台重构**：Vue 控制台按 design2 重构、应用工作台补注册侧五页签、新增 StarServer 安装引导页与安装脚本、首页改星尘平台门户（调用趋势曲线/平台徽标/概览缓存）
+- **WebApi 对齐**：Monitors/Nodes/Registry/Deployment 控制器对齐 MVC 行为，补齐根控制器与调用链关系图
+- **其他**：埋点上报前脱敏连接串与凭据、时钟偏差改用服务端时间签名、AppClient 事件上报失败落盘补报、节点校时支持项目级配置
+- **依赖升级**：NewLife.Agent 10.18.2026.1107-beta1336（beta，官方尚未发布正式版）、NewLife.Core 12.0.2026.1109-beta0553
+- **本地保留**：机器指纹可信门（`Node.FindByFingerprint` + `IsTrustedClient`）验证完整；品牌化元数据与 Costura 配置已恢复
+- **构建修复**：上游变化后 Costura 对 net8 目标也开始嵌入并清理外部 dll，与 apphost+dll 部署形态冲突（部署时新旧混装会版本错乱）。FodyWeavers 改 `DisableCleanup=true`：net6+ 保留外部 dll（每文件可核对版本），net45/net461 由 `CleanEmbeddedAssemblies` 兜底保持单文件（4.7MB、0 dll）
+
+---
+
 ## v3.10.2026.1024 (2026-10-24)
 
 ### 多语言本地化（跟随 NewLife.Core v12）

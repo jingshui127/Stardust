@@ -1,12 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Weavers xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="FodyWeavers.xsd">
-    <!-- 把依赖程序集嵌入 exe，net45/net461 目标产出单文件可执行 -->
+    <!-- 把依赖程序集嵌入 exe：net45/net461 产出单文件可执行（CleanEmbeddedAssemblies 兜底删 dll）；
+         net6+ 同样会嵌入，但 DisableCleanup=true 保留外部 dll——部署沿用 apphost+dll 形态，
+         外部文件优先加载，避免新旧混装版本错乱 -->
     <Costura CreateTemporaryAssemblies="false"
              IncludeDebugSymbols="false"
              IncludeRuntimeReferences="false"
              UseRuntimeReferencePaths="false"
              DisableCompression="false"
-             DisableCleanup="false">
+             DisableCleanup="true">
         <ExcludeAssemblies>
         </ExcludeAssemblies>
     </Costura>
