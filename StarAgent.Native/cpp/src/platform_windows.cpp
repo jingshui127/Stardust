@@ -5,7 +5,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <iterator>
 #include <map>
@@ -32,9 +34,11 @@
 #include <netioapi.h>
 #include <pdh.h>
 #include <pdhmsg.h>
+#include <tcpmib.h>
 #include <tlhelp32.h>
 #include <winioctl.h>
 #include <ws2tcpip.h>
+#include <icmpapi.h>
 
 namespace staragent::platform {
 namespace {
@@ -612,6 +616,235 @@ std::vector<std::string> ProcessNames()
 
 std::uint64_t UptimeSeconds() { return ::GetTickCount64() / 1000; }
 
+TcpCounts TcpStates()
+{
+    TcpCounts result;
+    auto count = [&result](DWORD state) {
+        switch (state)
+        {
+        case MIB_TCP_STATE_ESTAB: result.Established++; break;
+        case MIB_TCP_STATE_TIME_WAIT: result.TimeWait++; break;
+        case MIB_TCP_STATE_CLOSE_WAIT: result.CloseWait++; break;
+        default: break;
+        }
+    };
+
+    // IPv4 连接
+    DWORD size = 0;
+    ::GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0);
+    if (size > 0)
+    {
+        std::vector<std::uint8_t> buffer(size);
+        auto* table = reinterpret_cast<MIB_TCPTABLE_OWNER_PID*>(buffer.data());
+        if (::GetExtendedTcpTable(table, &size, FALSE, AF_INET, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR)
+        {
+            for (DWORD i = 0; i < table->dwNumEntries; i++) count(table->table[i].dwState);
+        }
+    }
+
+    // IPv6 连接，与 .NET 代理的 GetActiveTcpConnections 口径保持一致
+    size = 0;
+    ::GetExtendedTcpTable(nullptr, &size, FALSE, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0);
+    if (size > 0)
+    {
+        std::vector<std::uint8_t> buffer(size);
+        auto* table = reinterpret_cast<MIB_TCP6TABLE_OWNER_PID*>(buffer.data());
+        if (::GetExtendedTcpTable(table, &size, FALSE, AF_INET6, TCP_TABLE_OWNER_PID_ALL, 0) == NO_ERROR)
+        {
+            for (DWORD i = 0; i < table->dwNumEntries; i++) count(table->table[i].dwState);
+        }
+    }
+    return result;
+}
+
+double Temperature()
+{
+    // 性能计数器 "Thermal Zone Information" 提供 ACPI 温度，单位开尔文
+    static std::mutex mutex;
+    static PDH_HQUERY query = nullptr;
+    static PDH_HCOUNTER counter = nullptr;
+    static bool initialized = false;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!initialized)
+    {
+        initialized = true;
+        if (::PdhOpenQueryW(nullptr, 0, &query) == ERROR_SUCCESS)
+        {
+            if (::PdhAddEnglishCounterW(query, L"\\Thermal Zone Information(*)\\Temperature", 0, &counter) !=
+                ERROR_SUCCESS)
+            {
+                counter = nullptr;
+            }
+            // 首次采集建立基线
+            ::PdhCollectQueryData(query);
+        }
+        return 0;
+    }
+    if (query == nullptr || counter == nullptr) return 0;
+    if (::PdhCollectQueryData(query) != ERROR_SUCCESS) return 0;
+
+    DWORD size = 0;
+    DWORD count = 0;
+    if (::PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &size, &count, nullptr) != PDH_MORE_DATA || size == 0)
+    {
+        return 0;
+    }
+    std::vector<std::uint8_t> buffer(size);
+    auto* items = reinterpret_cast<PDH_FMT_COUNTERVALUE_ITEM_W*>(buffer.data());
+    if (::PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &size, &count, items) != ERROR_SUCCESS) return 0;
+
+    double best = 0;
+    for (DWORD i = 0; i < count; i++)
+    {
+        const auto& value = items[i].FmtValue;
+        if (value.CStatus != PDH_CSTATUS_VALID_DATA && value.CStatus != PDH_CSTATUS_NEW_DATA) continue;
+        if (value.doubleValue <= 0) continue;
+
+        // 兼容开尔文与"十分之一开尔文"两种上报口径
+        auto kelvin = value.doubleValue;
+        if (kelvin > 2700) kelvin /= 10;
+        const auto celsius = kelvin > 200 ? kelvin - 273.15 : kelvin;
+        // 计数器精度远高于实际需求，保留一位小数避免 27.850000000000023 这类浮点尾数
+        if (celsius > 0 && celsius < 150 && celsius > best) best = std::round(celsius * 10) / 10;
+    }
+    return best;
+}
+
+double BatteryPercent()
+{
+    SYSTEM_POWER_STATUS status{};
+    if (!::GetSystemPowerStatus(&status)) return 0;
+    if (status.BatteryFlag == 128) return 0; // 无电池
+    if (status.BatteryLifePercent == 255) return 0; // 未知
+    return status.BatteryLifePercent;
+}
+
+int WirelessSignal()
+{
+    // 无线信号强度暂不采集
+    return 0;
+}
+
+DiskIoSample DiskIo()
+{
+    // PDH 物理磁盘计数器：IOPS 与磁盘忙时占比（_Total 平均）
+    static std::mutex mutex;
+    static PDH_HQUERY query = nullptr;
+    static PDH_HCOUNTER transfers = nullptr;
+    static PDH_HCOUNTER active = nullptr;
+    static bool initialized = false;
+
+    std::lock_guard<std::mutex> lock(mutex);
+    if (!initialized)
+    {
+        initialized = true;
+        if (::PdhOpenQueryW(nullptr, 0, &query) == ERROR_SUCCESS)
+        {
+            if (::PdhAddEnglishCounterW(query, L"\\PhysicalDisk(_Total)\\Disk Transfers/sec", 0, &transfers) !=
+                ERROR_SUCCESS)
+            {
+                transfers = nullptr;
+            }
+            if (::PdhAddEnglishCounterW(query, L"\\PhysicalDisk(_Total)\\% Idle Time", 0, &active) != ERROR_SUCCESS)
+            {
+                active = nullptr;
+            }
+            // 首次采集只用于建立基线，不返回数据
+            ::PdhCollectQueryData(query);
+        }
+        return {};
+    }
+    if (query == nullptr) return {};
+    if (::PdhCollectQueryData(query) != ERROR_SUCCESS) return {};
+
+    DiskIoSample result;
+    if (transfers != nullptr)
+    {
+        PDH_FMT_COUNTERVALUE value{};
+        if (::PdhGetFormattedCounterValue(transfers, PDH_FMT_DOUBLE, nullptr, &value) == ERROR_SUCCESS &&
+            value.CStatus == PDH_CSTATUS_VALID_DATA && value.doubleValue > 0)
+        {
+            result.Iops = static_cast<std::uint64_t>(value.doubleValue + 0.5);
+        }
+    }
+    if (active != nullptr)
+    {
+        PDH_FMT_COUNTERVALUE value{};
+        if (::PdhGetFormattedCounterValue(active, PDH_FMT_DOUBLE, nullptr, &value) == ERROR_SUCCESS &&
+            value.CStatus == PDH_CSTATUS_VALID_DATA)
+        {
+            // 用空闲时间反推活动时间，与 .NET 客户端一致；% Disk Time 在多磁盘/队列下会超出 100，不适合做百分比
+            result.ActivePercent = std::min(100.0, std::max(0.0, 100.0 - value.doubleValue));
+        }
+    }
+    return result;
+}
+
+std::uint64_t MaxOpenFiles() { return 0; }
+
+ProbeResult PingProbe(const std::string& host, int timeout_ms, int count)
+{
+    ProbeResult result;
+    if (host.empty() || count <= 0) return result;
+
+    IN_ADDR address{};
+    if (::inet_pton(AF_INET, host.c_str(), &address) != 1)
+    {
+        addrinfo hints{};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_STREAM;
+        addrinfo* info = nullptr;
+        if (::getaddrinfo(host.c_str(), nullptr, &hints, &info) != 0 || info == nullptr) return result;
+        address = reinterpret_cast<const sockaddr_in*>(info->ai_addr)->sin_addr;
+        ::freeaddrinfo(info);
+    }
+
+    HANDLE handle = ::IcmpCreateFile();
+    if (handle == INVALID_HANDLE_VALUE) return result;
+
+    // 复用缓冲：ICMP_ECHO_REPLY 后可跟回显数据
+    std::vector<char> reply(sizeof(ICMP_ECHO_REPLY) + 64);
+    const char payload[] = "staragent-ping";
+    int success = 0;
+    double total = 0;
+    for (int i = 0; i < count; i++)
+    {
+        const DWORD sent = ::IcmpSendEcho(handle, address.S_un.S_addr, const_cast<char*>(payload),
+                                          static_cast<WORD>(sizeof(payload)), nullptr, reply.data(),
+                                          static_cast<DWORD>(reply.size()), static_cast<DWORD>(timeout_ms));
+        if (sent > 0)
+        {
+            const auto* echo = reinterpret_cast<const ICMP_ECHO_REPLY*>(reply.data());
+            if (echo->Status == IP_SUCCESS)
+            {
+                success++;
+                total += echo->RoundTripTime;
+            }
+        }
+        if (i + 1 < count) std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
+    ::IcmpCloseHandle(handle);
+
+    result.Valid = true;
+    if (success == 0)
+    {
+        result.LossRate = 1;
+        return result;
+    }
+    result.Latency = static_cast<int>(std::lround(total / success));
+    result.LossRate = std::round((1.0 - static_cast<double>(success) / count) * 1000.0) / 1000.0;
+    result.Score = ComputePingScore(result.Latency, success, count);
+    return result;
+}
+
+bool PowerAction(bool reboot)
+{
+    // 延迟 30 秒，给命令回包与日志落盘留出时间
+    const auto command = reboot ? "shutdown.exe /r /t 30 /f" : "shutdown.exe /s /t 30 /f";
+    return std::system(command) == 0;
+}
+
 double LoadAverage()
 {
     std::lock_guard<std::mutex> lock(g_mutex);
@@ -1059,17 +1292,6 @@ bool RestartSelf(const std::vector<std::string>& arguments)
     ::CloseHandle(process.hThread);
     ::CloseHandle(process.hProcess);
     return true;
-}
-
-bool SleepCancelable(int milliseconds, const std::atomic<bool>& cancelled)
-{
-    const auto deadline = SteadyMsNow() + milliseconds;
-    while (!cancelled.load() && SteadyMsNow() < deadline)
-    {
-        const auto remaining = deadline - SteadyMsNow();
-        std::this_thread::sleep_for(std::chrono::milliseconds(std::min<std::int64_t>(50, std::max<std::int64_t>(1, remaining))));
-    }
-    return !cancelled.load();
 }
 
 } // namespace staragent::platform

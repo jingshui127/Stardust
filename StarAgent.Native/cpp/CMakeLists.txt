@@ -56,23 +56,27 @@ endif()
 
 set(STARAGENT_SOURCES
   src/agent.cpp
+  src/bootstrap.cpp
   src/config.cpp
+  src/console.cpp
   src/events.cpp
   src/executor.cpp
   src/http_client.cpp
+  src/local_api.cpp
   src/logging.cpp
   src/metrics.cpp
   src/protocol.cpp
   src/util.cpp
   src/ws_client.cpp
+  src/platform_common.cpp
 )
 
 if(WIN32)
-  list(APPEND STARAGENT_SOURCES src/platform_windows.cpp src/service_windows.cpp)
+  list(APPEND STARAGENT_SOURCES src/platform_windows.cpp)
 elseif(APPLE)
-  list(APPEND STARAGENT_SOURCES src/platform_macos.cpp src/service_posix.cpp)
+  list(APPEND STARAGENT_SOURCES src/platform_macos.cpp src/platform_posix.cpp)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  list(APPEND STARAGENT_SOURCES src/platform_linux.cpp src/service_posix.cpp)
+  list(APPEND STARAGENT_SOURCES src/platform_linux.cpp src/platform_posix.cpp)
 else()
   message(FATAL_ERROR "Unsupported platform ${CMAKE_SYSTEM_NAME}: Windows, Linux (including OpenWrt) and macOS are supported.")
 endif()

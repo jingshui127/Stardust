@@ -19,7 +19,7 @@ namespace Stardust.Server.Controllers;
 
 //[ApiController]
 [Route("[controller]")]
-public class TraceController(ITraceStatService stat, IAppDayStatService appStat, ITraceItemStatService itemStat, ITokenService tokenService, AppOnlineService appOnline, UplinkService uplink, MonitorService monitorService, StarServerSetting setting, ICacheProvider cacheProvider, ITracer tracer) : ControllerBase
+public class TraceController(ITraceStatService stat, IAppDayStatService appStat, ITraceItemStatService itemStat, ITokenService tokenService, AppOnlineService appOnline, UplinkService uplink, MonitorService monitorService, StarServerSetting setting, ICacheProvider cacheProvider, ITracer tracer, BrowserTokenService browserToken) : ControllerBase
 {
     /// <summary>接收埋点数据上报。支持 Vip 客户端高频采样与排除项</summary>
     /// <param name="model">埋点数据模型</param>
@@ -122,6 +122,23 @@ public class TraceController(ITraceStatService stat, IAppDayStatService appStat,
             if (clientId.IsNullOrEmpty()) clientId = jwt.Id;
 
             ap = ap1;
+        }
+        // 浏览器短期令牌。不透明令牌，仅能用于埋点上报，不能当作应用令牌访问其它接口
+        else if (!token.IsNullOrEmpty() && browserToken != null)
+        {
+            var ap2 = browserToken.Validate(token);
+            if (ap2 != null)
+            {
+                // 令牌主体必须与上报应用一致，防止冒名向其它应用灌数据
+                if (!appId.IsNullOrEmpty() && !appId.EqualIgnoreCase(ap2.Name))
+                    throw new ApiException(ApiCode.Forbidden, L.T("Token subject [{0}] does not match the reporting application [{1}].", ap2.Name, appId));
+
+                if (appId.IsNullOrEmpty()) appId = ap2.Name;
+
+                ap = ap2;
+            }
+            else if (!setting.AnonymousReport)
+                throw new ApiException(ApiCode.Unauthorized, L.T("No valid token provided; anonymous reporting is forbidden. Enable AnonymousReport in StarServer to allow multi-level cascading."));
         }
         // 匿名上报仅用于多级级联（下级StarServer转发）或未配置密钥的极简SDK，默认关闭（安全V-9）
         else if (!setting.AnonymousReport)
@@ -276,6 +293,16 @@ public class TraceController(ITraceStatService stat, IAppDayStatService appStat,
 
                 traces.Add(td);
 
+                // 已知无害的传输层中断只保留首行和业务帧，避免长堆栈淹没监控样本；真实异常保留完整堆栈
+                var errorMessages = item.ErrorSamples?.Select(e => e?.Error ?? "").ToList();
+                if (item.ErrorSamples != null)
+                {
+                    foreach (var sample in item.ErrorSamples)
+                    {
+                        if (sample != null) sample.Error = ErrorSampleFilter.Summarize(sample.Error);
+                    }
+                }
+
                 //samples.AddRange(SampleData.Create(td, item.Samples, true));
                 samples.AddRange(SampleData.Create(td, item.ErrorSamples, false));
 
@@ -294,6 +321,13 @@ public class TraceController(ITraceStatService stat, IAppDayStatService appStat,
 
                 // 如果最小耗时都超过了超时设置，则全部标记为错误
                 if (isTimeout && td.MinCost >= timeout && td.Errors < td.Total) td.Errors = td.Total;
+
+                // 连通性探测等非业务埋点不计入错误数，避免旧客户端探测失败污染应用错误率与告警
+                if (td.Errors > 0 && ErrorItemFilter.IsMatch(item.Name)) td.Errors = 0;
+
+                // 客户端提前断开等传输层中断不计入错误数，异常采样照常保留便于排障
+                if (td.Errors > 0 && errorMessages != null)
+                    td.Errors = ErrorSampleFilter.FixErrors(td.Errors, errorMessages);
 
                 // 处理克隆。拷贝一份入库，归属新的跟踪项，但名称不变
                 foreach (var elm in app.GetClones(item.Name, model.ClientId))

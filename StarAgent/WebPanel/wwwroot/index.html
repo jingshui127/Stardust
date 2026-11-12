@@ -306,7 +306,8 @@ async function doLogin(){
    else e.textContent=j.message||'登录失败';
    e.classList.add('show');return
   }
-  token=j.data.token;sessionStorage.setItem('agent_token',token);showApp();
+  token=j.data.token;sessionStorage.setItem('agent_token',token);
+  showApp();
  }catch(ex){e.textContent='网络错误，请检查服务是否正常运行';e.classList.add('show')}
 }
 
@@ -867,7 +868,9 @@ async function doControl(action){
 /* ── Config ── */
 async function loadConfig(){
  try{
-  const j=await api('/api/configMetadata');if(j.code!==0)return;const items=j.data.items||[];
+  const j=await api('/api/configMetadata');if(j.code!==0)return;
+  // 监听地址/端口由 staragent.config 统管（启动时覆盖 Agent.config），不在此处编辑
+  const items=(j.data.items||[]).filter(i=>!['WebBind','WebPort'].includes(i.name));
   let html=`<div class="glass-card card"><h2>⚙ Agent 配置</h2><table class="config-table"><tbody>`;
   items.forEach(item=>{
    html+=`<tr><td>${esc(item.displayName)}</td><td>${renderConfigInput(item)}</td><td>${esc(item.description)}</td></tr>`;
@@ -885,7 +888,6 @@ async function loadConfig(){
   html+=`<button class="btn btn-primary" onclick="changePassword()">修改密码</button>`;
   html+=`<span id="pwd-msg" style="font-size:12px;color:var(--text-muted)"></span></div></div>`;
 
-  $('panel-config').innerHTML=html;
  }catch(e){$('panel-config').innerHTML=`<div class="glass-card card"><h2>⚙ Agent 配置</h2><p class="text-muted">加载失败</p></div>`}
 }
 
@@ -910,7 +912,21 @@ async function saveConfig(){
  });
  try{
   const j=await api('/api/updateConfig',{method:'POST',body:JSON.stringify(updates)});
-  if(j.code===0){dirtyFields.clear();showToast(j.message,'success');loadConfig()}
+  if(j.code===0){
+   dirtyFields.clear();showToast(j.message,'success');
+   const d=j.data;
+   if(d&&d.port){
+    // 监听端口变化意味着 origin 变化，跳到新地址重新登录
+    const curPort=location.port||(location.protocol==='https:'?'443':'80');
+    const reachable=String(d.port)===curPort&&(d.listenAll||d.address===location.hostname);
+    if(!reachable){
+     const host=d.listenAll?location.hostname:(d.address||location.hostname);
+     setTimeout(()=>{location.replace(location.protocol+'//'+host+':'+d.port+'/')},1500);
+     return;
+    }
+   }
+   loadConfig()
+  }
   else showToast(j.message,'error');
  }catch(e){showToast('保存失败','error')}
 }

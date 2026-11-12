@@ -7,6 +7,7 @@ using Stardust.Data;
 
 namespace Stardust.Web.Areas.Registry.Controllers;
 
+/// <summary>应用指令。下发到应用的命令记录</summary>
 [Menu(58, false)]
 [RegistryArea]
 public class AppCommandController : RegistryEntityController<AppCommand>
@@ -23,7 +24,7 @@ public class AppCommandController : RegistryEntityController<AppCommand>
             var df = ListFields.GetField("Command") as ListField;
             df.Url = "/Registry/AppCommand?appId={AppId}&command={Command}";
         }
-        ListFields.TraceUrl();
+        ListFields.LocalizedTraceUrl();
     }
 
     /// <summary>高级搜索。按条件分页查询</summary>

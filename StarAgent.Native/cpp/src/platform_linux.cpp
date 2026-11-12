@@ -4,11 +4,14 @@
 
 #include "config.hpp"
 #include "output_buffer.hpp"
+#include "platform_posix.hpp"
 
 #include <algorithm>
 #include <arpa/inet.h>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -33,6 +36,11 @@
 #include <thread>
 #include <unistd.h>
 
+#if defined(__GLIBC__)
+#include <gnu/libc-version.h>
+#endif
+#include <sys/resource.h>
+
 namespace staragent::platform {
 namespace {
 
@@ -41,65 +49,18 @@ std::uint64_t g_prev_idle = 0;
 std::uint64_t g_prev_total = 0;
 bool g_has_cpu_sample = false;
 
+// 以下解析/读取逻辑与 macOS 共用，实现见 platform_posix.cpp。
+using internal::CleanId;
+using internal::FormatMac;
+using internal::IsVirtualInterface;
+using internal::SockaddrToIp;
+
 std::string ReadFile(const std::string& path, std::size_t max = 1024 * 1024)
 {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream) return {};
-    std::string result;
-    result.resize(max);
-    stream.read(result.data(), static_cast<std::streamsize>(max));
-    result.resize(static_cast<std::size_t>(stream.gcount()));
-    return result;
+    return internal::ReadSysFile(path, max);
 }
 
-std::string ReadTrim(const std::string& path)
-{
-    return Trim(ReadFile(path, 64 * 1024));
-}
-
-bool IsVirtualInterface(const std::string& name)
-{
-    const auto lower = ToLower(name);
-    const char* prefixes[] = {"lo",      "docker",  "veth",    "br-",     "virbr",   "vmnet",
-                              "tun",     "tap",     "utun",    "awdl",    "llw",     "bridge",
-                              "vboxnet", "zt",      "tailscale", "wg",    "cni",     "flannel"};
-    for (const char* prefix : prefixes)
-    {
-        if (StartsWith(lower, prefix)) return true;
-    }
-    return false;
-}
-
-std::string FormatMac(const unsigned char* data, std::size_t length)
-{
-    char text[64];
-    std::string result;
-    for (std::size_t i = 0; i < length; i++)
-    {
-        std::snprintf(text, sizeof(text), "%s%02X", i == 0 ? "" : "-", data[i]);
-        result += text;
-    }
-    return result;
-}
-
-std::string SockaddrToIp(const sockaddr* address)
-{
-    if (address == nullptr) return {};
-    char text[INET6_ADDRSTRLEN] = {};
-    if (address->sa_family == AF_INET)
-    {
-        const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(address);
-        if (::inet_ntop(AF_INET, &ipv4->sin_addr, text, sizeof(text)) == nullptr) return {};
-        return text;
-    }
-    if (address->sa_family == AF_INET6)
-    {
-        const auto* ipv6 = reinterpret_cast<const sockaddr_in6*>(address);
-        if (::inet_ntop(AF_INET6, &ipv6->sin6_addr, text, sizeof(text)) == nullptr) return {};
-        return text;
-    }
-    return {};
-}
+std::string ReadTrim(const std::string& path) { return internal::ReadSysTrim(path); }
 
 std::string LinuxGateway()
 {
@@ -121,19 +82,7 @@ std::string LinuxGateway()
     return {};
 }
 
-std::string LinuxDns()
-{
-    std::istringstream stream(ReadFile("/etc/resolv.conf"));
-    std::string line;
-    std::vector<std::string> servers;
-    while (std::getline(stream, line))
-    {
-        std::istringstream fields(line);
-        std::string key, value;
-        if (fields >> key >> value && key == "nameserver") servers.push_back(value);
-    }
-    return Join(servers, ",");
-}
+std::string LinuxDns() { return internal::DnsServers(); }
 
 std::string LinuxDiskSerial()
 {
@@ -151,6 +100,7 @@ std::string LinuxDiskSerial()
         }
         auto serial = ReadTrim("/sys/block/" + name + "/device/serial");
         if (serial.empty()) serial = ReadTrim("/sys/block/" + name + "/serial");
+        if (StartsWith(serial, "0x") || StartsWith(serial, "0X")) serial.erase(0, 2);
         if (!serial.empty())
         {
             result = serial;
@@ -159,20 +109,6 @@ std::string LinuxDiskSerial()
     }
     ::closedir(directory);
     return result;
-}
-
-std::string CleanId(std::string value)
-{
-    value = Trim(value);
-    if (!value.empty() && (value.front() == '"' || value.front() == '\'')) value.erase(0, 1);
-    if (!value.empty() && (value.back() == '"' || value.back() == '\'')) value.pop_back();
-    const auto lower = ToLower(value);
-    static const std::set<std::string> invalid = {"", "none", "unknown", "not specified", "not settable",
-                                                  "to be filled by o.e.m.", "default string",
-                                                  "system serial number", "0",
-                                                  "00000000-0000-0000-0000-000000000000",
-                                                  "ffffffff-ffff-ffff-ffff-ffffffffffff"};
-    return invalid.count(lower) > 0 ? std::string() : value;
 }
 
 std::string ReadOsRelease(const std::string& key)
@@ -267,16 +203,23 @@ std::vector<DriveEntry> Drives()
     std::istringstream stream(ReadFile("/proc/mounts"));
     std::string line;
     static const std::set<std::string> ignored = {
-        "proc",       "sysfs",      "devtmpfs",  "devpts",   "cgroup",    "cgroup2", "securityfs",
-        "pstore",     "efivarfs",   "bpf",       "tracefs",  "debugfs",   "configfs", "fusectl",
-        "mqueue",     "hugetlbfs",  "ramfs",     "autofs",   "binfmt_misc", "rpc_pipefs", "nsfs"};
+        "proc",        "sysfs",     "devtmpfs", "devpts",      "cgroup",     "cgroup2",    "securityfs",
+        "pstore",      "efivarfs",  "bpf",      "tracefs",     "debugfs",    "configfs",   "fusectl",
+        "mqueue",      "hugetlbfs", "ramfs",    "autofs",      "binfmt_misc", "rpc_pipefs", "nsfs",
+        "tmpfs",       "zram",      "zram0",    "none"};
     while (std::getline(stream, line))
     {
         std::istringstream fields(line);
         std::string device, path, file_system;
         if (!(fields >> device >> path >> file_system)) continue;
         if (ignored.count(file_system) > 0) continue;
-        if (StartsWith(path, "/sys") || StartsWith(path, "/proc") || StartsWith(path, "/dev")) continue;
+        if (StartsWith(path, "/sys") || StartsWith(path, "/proc") || StartsWith(path, "/dev") ||
+            StartsWith(path, "/run"))
+        {
+            continue;
+        }
+        // 容器/嵌入式常见只读根文件系统：仅保留根挂载点，其余镜像层不参与磁盘统计
+        if ((file_system == "overlay" || file_system == "squashfs") && path != "/") continue;
         struct statvfs stats{};
         if (::statvfs(path.c_str(), &stats) != 0) continue;
         const auto total = static_cast<std::uint64_t>(stats.f_blocks) * stats.f_frsize;
@@ -354,6 +297,290 @@ std::uint64_t UptimeSeconds()
     return static_cast<std::uint64_t>(std::strtod(text.c_str(), nullptr));
 }
 
+namespace {
+
+std::vector<std::string> ListDir(const std::string& path)
+{
+    std::vector<std::string> names;
+    DIR* directory = ::opendir(path.c_str());
+    if (directory == nullptr) return names;
+    while (auto* entry = ::readdir(directory))
+    {
+        const std::string name = entry->d_name;
+        if (name == "." || name == "..") continue;
+        names.push_back(name);
+    }
+    ::closedir(directory);
+    std::sort(names.begin(), names.end());
+    return names;
+}
+
+std::string CpuModel()
+{
+    std::istringstream stream(ReadFile("/proc/cpuinfo", 256 * 1024));
+    std::string line;
+    std::string model;
+    std::string hardware;
+    while (std::getline(stream, line))
+    {
+        const auto position = line.find(':');
+        if (position == std::string::npos) continue;
+        const auto key = Trim(line.substr(0, position));
+        const auto value = Trim(line.substr(position + 1));
+        if (value.empty()) continue;
+        if (key == "model name" && model.empty()) model = value;
+        else if (key == "Processor" && model.empty()) model = value;
+        else if (key == "Hardware" && hardware.empty()) hardware = value;
+    }
+    return model.empty() ? hardware : model;
+}
+
+std::string DeviceTreeString(const std::string& path)
+{
+    auto value = ReadFile(path, 4096);
+    const auto end = value.find('\0');
+    if (end != std::string::npos) value.resize(end);
+    return Trim(value);
+}
+
+std::string CLibVersion()
+{
+#if defined(__GLIBC__)
+    const auto* version = ::gnu_get_libc_version();
+    if (version != nullptr) return std::string("glibc ") + version;
+#endif
+    return {};
+}
+
+double ReadTemperatureFile(const std::string& path)
+{
+    const auto text = ReadTrim(path);
+    if (text.empty()) return 0;
+    const auto value = std::strtod(text.c_str(), nullptr);
+    if (value <= 0) return 0;
+    // 多数平台为毫摄氏度，少数直接给摄氏度
+    const auto celsius = value > 1000 ? value / 1000.0 : value;
+    // 保留一位小数，避免上报出 27.850000000000023 这类浮点尾数
+    return celsius > 0 && celsius < 150 ? std::round(celsius * 10) / 10 : 0;
+}
+
+bool IsPhysicalDisk(const std::string& name)
+{
+    if (StartsWith(name, "loop") || StartsWith(name, "ram") || StartsWith(name, "dm-") ||
+        StartsWith(name, "md") || StartsWith(name, "sr") || StartsWith(name, "fd"))
+    {
+        return false;
+    }
+    if (StartsWith(name, "nvme") || StartsWith(name, "mmcblk")) return name.find('p') == std::string::npos;
+    if (StartsWith(name, "sd") || StartsWith(name, "vd") || StartsWith(name, "xvd") ||
+        StartsWith(name, "hd") || StartsWith(name, "ublk"))
+    {
+        const auto last = name.back();
+        return last < '0' || last > '9';
+    }
+    return false;
+}
+
+std::uint64_t g_disk_ios = 0;
+std::uint64_t g_disk_ticks = 0;
+std::int64_t g_disk_time_ms = 0;
+bool g_has_disk_sample = false;
+
+} // namespace
+
+double Temperature()
+{
+    for (const auto& name : ListDir("/sys/class/thermal"))
+    {
+        if (!StartsWith(name, "thermal_zone")) continue;
+        const auto value = ReadTemperatureFile("/sys/class/thermal/" + name + "/temp");
+        if (value > 0) return value;
+    }
+    for (const auto& name : ListDir("/sys/class/hwmon"))
+    {
+        const auto base = "/sys/class/hwmon/" + name;
+        for (const auto& file : ListDir(base))
+        {
+            if (!StartsWith(file, "temp") || !EndsWith(file, "_input")) continue;
+            const auto value = ReadTemperatureFile(base + "/" + file);
+            if (value > 0) return value;
+        }
+    }
+    return 0;
+}
+
+double BatteryPercent()
+{
+    // /sys/class/power_supply/BAT*/capacity 为 0~100 的整数百分比
+    for (const auto& name : ListDir("/sys/class/power_supply"))
+    {
+        if (!StartsWith(name, "BAT")) continue;
+        const auto text = ReadTrim("/sys/class/power_supply/" + name + "/capacity");
+        if (text.empty()) continue;
+        const auto value = std::strtod(text.c_str(), nullptr);
+        if (value > 0 && value <= 100) return value;
+    }
+    return 0;
+}
+
+int WirelessSignal()
+{
+    // /proc/net/wireless：链路质量通常以 70 为满值，-1 表示未连接
+    std::istringstream stream(ReadFile("/proc/net/wireless"));
+    std::string line;
+    std::getline(stream, line);
+    std::getline(stream, line);
+    int best = 0;
+    while (std::getline(stream, line))
+    {
+        const auto colon = line.find(':');
+        if (colon == std::string::npos) continue;
+        std::istringstream fields(line.substr(colon + 1));
+        double status = 0;
+        double link = 0;
+        double level = 0;
+        if (!(fields >> status >> link >> level)) continue;
+        if (link <= 0) continue;
+        // 不同驱动满值不同：传统 wireless-extensions 为 70，cfg80211 多为 100
+        auto percent = link <= 70 ? static_cast<int>(link * 100.0 / 70.0 + 0.5) : static_cast<int>(link + 0.5);
+        if (percent > 100) percent = 100;
+        if (percent > best) best = percent;
+    }
+    return best;
+}
+
+DiskIoSample DiskIo()
+{
+    DiskIoSample result;
+    std::istringstream stream(ReadFile("/proc/diskstats", 256 * 1024));
+    std::string line;
+    std::uint64_t ios = 0;
+    std::uint64_t ticks = 0;
+    while (std::getline(stream, line))
+    {
+        std::istringstream fields(line);
+        std::vector<std::string> tokens;
+        std::string token;
+        while (fields >> token) tokens.push_back(token);
+        if (tokens.size() < 14) continue;
+        if (!IsPhysicalDisk(tokens[2])) continue;
+        ios += std::strtoull(tokens[3].c_str(), nullptr, 10);
+        ios += std::strtoull(tokens[7].c_str(), nullptr, 10);
+        ticks += std::strtoull(tokens[12].c_str(), nullptr, 10);
+    }
+
+    const auto now = SteadyMsNow();
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_has_disk_sample && now > g_disk_time_ms && ios >= g_disk_ios && ticks >= g_disk_ticks)
+    {
+        const auto elapsed = static_cast<double>(now - g_disk_time_ms);
+        if (elapsed > 0)
+        {
+            result.Iops = static_cast<std::uint64_t>(static_cast<double>(ios - g_disk_ios) * 1000.0 / elapsed + 0.5);
+            const auto active = static_cast<double>(ticks - g_disk_ticks) * 100.0 / elapsed;
+            result.ActivePercent = std::min(100.0, std::max(0.0, active));
+        }
+    }
+    g_disk_ios = ios;
+    g_disk_ticks = ticks;
+    g_disk_time_ms = now;
+    g_has_disk_sample = true;
+    return result;
+}
+
+std::uint64_t MaxOpenFiles()
+{
+    struct rlimit limit{};
+    if (::getrlimit(RLIMIT_NOFILE, &limit) != 0) return 0;
+    if (limit.rlim_cur == RLIM_INFINITY) return 0;
+    return static_cast<std::uint64_t>(limit.rlim_cur);
+}
+
+ProbeResult PingProbe(const std::string& host, int timeout_ms, int count){
+    ProbeResult result;
+    if (host.empty() || count <= 0) return result;
+
+    static const std::atomic<bool> never_cancelled{false};
+    const auto timeout_sec = std::max(1, (timeout_ms + 999) / 1000);
+    const auto command = "ping -c " + std::to_string(count) + " -W " + std::to_string(timeout_sec) + " " + host;
+    const auto shell = RunShell(command, (count + 2) * 1000 + 2000, never_cancelled);
+    if (shell.Output.empty()) return result;
+
+    // 统计 "time=12.3 ms" 出现次数，兼容 busybox 与 iputils 输出
+    int success = 0;
+    double total = 0;
+    std::size_t position = 0;
+    while ((position = shell.Output.find("time=", position)) != std::string::npos)
+    {
+        position += 5;
+        auto end = position;
+        while (end < shell.Output.size() &&
+               (std::isdigit(static_cast<unsigned char>(shell.Output[end])) || shell.Output[end] == '.'))
+        {
+            end++;
+        }
+        if (end > position)
+        {
+            success++;
+            total += std::strtod(shell.Output.substr(position, end - position).c_str(), nullptr);
+        }
+    }
+
+    result.Valid = true;
+    if (success == 0)
+    {
+        result.LossRate = 1;
+        return result;
+    }
+    result.Latency = static_cast<int>(std::lround(total / success));
+    result.LossRate = std::round((1.0 - static_cast<double>(success) / count) * 1000.0) / 1000.0;
+    result.Score = ComputePingScore(result.Latency, success, count);
+    return result;
+}
+
+bool PowerAction(bool reboot)
+{
+    // 依赖系统 init 执行真正的重启/关机，需要有权限（通常为 root）
+    static const std::atomic<bool> never_cancelled{false};
+    const auto shell = RunShell(reboot ? "reboot" : "poweroff", 5000, never_cancelled);
+    return shell.ExitCode == 0;
+}
+
+namespace {
+
+void CountTcpFile(const char* path, TcpCounts& result)
+{
+    std::istringstream stream(ReadFile(path, 256 * 1024));
+    std::string line;
+    std::getline(stream, line); // 表头
+    while (std::getline(stream, line))
+    {
+        std::istringstream fields(line);
+        std::string sl, local, remote, state;
+        if (!(fields >> sl >> local >> remote >> state)) continue;
+
+        // st 为十六进制：01 ESTABLISHED、06 TIME_WAIT、08 CLOSE_WAIT
+        const auto value = static_cast<unsigned>(std::strtoul(state.c_str(), nullptr, 16));
+        switch (value)
+        {
+        case 0x01: result.Established++; break;
+        case 0x06: result.TimeWait++; break;
+        case 0x08: result.CloseWait++; break;
+        default: break;
+        }
+    }
+}
+
+} // namespace
+
+TcpCounts TcpStates()
+{
+    TcpCounts result;
+    CountTcpFile("/proc/net/tcp", result);
+    CountTcpFile("/proc/net/tcp6", result);
+    return result;
+}
+
 double LoadAverage()
 {
     const auto text = ReadTrim("/proc/loadavg");
@@ -363,13 +590,36 @@ double LoadAverage()
 HardwareInfo Hardware()
 {
     HardwareInfo result;
-    result.UUID = CleanId(ReadTrim("/sys/class/dmi/id/product_uuid"));
+    // 板级标识优先取 /etc/os-release 中设备端写入的字段（与 MachineInfo 约定一致），
+    // 缺失时依次回落 DMI 与设备树，避免 ARM 板只报内核设备名而丢失厂商/整机型号。
+    result.Vendor = CleanId(ReadOsRelease("Vendor"));
+    if (result.Vendor.empty()) result.Vendor = CleanId(ReadTrim("/sys/class/dmi/id/sys_vendor"));
+    if (result.Vendor.empty()) result.Vendor = CleanId(DeviceTreeString("/proc/device-tree/vendor"));
+
+    result.Product = CleanId(ReadOsRelease("Product"));
+    if (result.Product.empty()) result.Product = CleanId(DeviceTreeString("/proc/device-tree/model"));
+    if (result.Product.empty()) result.Product = CleanId(ReadTrim("/sys/class/dmi/id/product_name"));
+    if (result.Product.empty()) result.Product = CleanId(ReadTrim("/sys/class/dmi/id/board_name"));
+
+    result.SerialNumber = CleanId(ReadOsRelease("Serial"));
+    if (result.SerialNumber.empty()) result.SerialNumber = CleanId(ReadTrim("/sys/class/dmi/id/product_serial"));
+
+    result.Board = CleanId(ReadOsRelease("Board"));
+    if (result.Board.empty()) result.Board = CleanId(ReadTrim("/sys/class/dmi/id/board_serial"));
+    if (result.Board.empty()) result.Board = CleanId(ReadTrim("/sys/class/dmi/id/board_name"));
+    if (result.Board.empty()) result.Board = CleanId(DeviceTreeString("/proc/device-tree/model"));
+
+    result.UUID = CleanId(ReadTrim("/etc/uuid"));
+    if (result.UUID.empty()) result.UUID = CleanId(ReadTrim("/sys/class/dmi/id/product_uuid"));
     result.MachineGuid = CleanId(ReadTrim("/etc/machine-id"));
     if (result.MachineGuid.empty()) result.MachineGuid = CleanId(ReadTrim("/var/lib/dbus/machine-id"));
-    result.SerialNumber = CleanId(ReadTrim("/sys/class/dmi/id/product_serial"));
-    result.Board = CleanId(ReadTrim("/sys/class/dmi/id/board_serial"));
-    if (result.Board.empty()) result.Board = CleanId(ReadTrim("/sys/class/dmi/id/board_name"));
     result.DiskID = CleanId(LinuxDiskSerial());
+
+    // 处理器：x86 取 model name，ARM 板取设备树 model，均缺失时退回整机型号
+    result.Processor = CpuModel();
+    if (result.Processor.empty()) result.Processor = CleanId(DeviceTreeString("/proc/device-tree/model"));
+    if (result.Processor.empty()) result.Processor = result.Product;
+    result.CLibVersion = CLibVersion();
 
     std::set<std::string> macs;
     struct ifaddrs* addresses = nullptr;
@@ -472,25 +722,6 @@ std::string ExecutablePath()
     return std::string(buffer, static_cast<std::size_t>(length));
 }
 
-std::string ExecutableDir()
-{
-    const auto path = ExecutablePath();
-    const auto position = path.find_last_of('/');
-    return position == std::string::npos ? std::string(".") : path.substr(0, position);
-}
-
-int ProcessId() { return static_cast<int>(::getpid()); }
-bool IsRoot() { return ::geteuid() == 0; }
-
-std::string HomeDir()
-{
-    if (const auto* user = ::getpwuid(::geteuid()))
-    {
-        if (user->pw_dir != nullptr) return user->pw_dir;
-    }
-    return staragent::EnvironmentValue({"HOME"});
-}
-
 std::string DefaultDataDir()
 {
     if (IsRoot()) return "/var/lib/staragent";
@@ -504,142 +735,6 @@ std::string TimeZoneName()
     if (!timezone.empty()) return timezone;
     const auto env = staragent::EnvironmentValue({"TZ"});
     return env;
-}
-
-bool SetSystemTime(TimePoint value)
-{
-    const auto milliseconds =
-        std::chrono::duration_cast<std::chrono::milliseconds>(value.time_since_epoch()).count();
-    timeval time{};
-    time.tv_sec = static_cast<time_t>(milliseconds / 1000);
-    time.tv_usec = static_cast<suseconds_t>((milliseconds % 1000) * 1000);
-    return ::settimeofday(&time, nullptr) == 0;
-}
-
-ShellResult RunShell(const std::string& script, int timeout_ms, const std::atomic<bool>& cancelled)
-{
-    ShellResult result;
-    if (timeout_ms <= 0) timeout_ms = 30000;
-
-    int pipe_fds[2];
-    if (::pipe(pipe_fds) != 0)
-    {
-        result.Error = "pipe failed";
-        return result;
-    }
-
-    const pid_t pid = ::fork();
-    if (pid < 0)
-    {
-        ::close(pipe_fds[0]);
-        ::close(pipe_fds[1]);
-        result.Error = "fork failed";
-        return result;
-    }
-    if (pid == 0)
-    {
-        ::setsid();
-        ::close(pipe_fds[0]);
-        ::dup2(pipe_fds[1], STDOUT_FILENO);
-        ::dup2(pipe_fds[1], STDERR_FILENO);
-        ::close(pipe_fds[1]);
-        int null_fd = ::open("/dev/null", O_RDONLY);
-        if (null_fd >= 0)
-        {
-            ::dup2(null_fd, STDIN_FILENO);
-            ::close(null_fd);
-        }
-        ::execl("/bin/bash", "bash", "-c", script.c_str(), static_cast<char*>(nullptr));
-        ::_exit(127);
-    }
-
-    ::close(pipe_fds[1]);
-    ::fcntl(pipe_fds[0], F_SETFL, O_NONBLOCK);
-
-    HeadTailBuffer buffer(64 * 1024);
-    const auto started = SteadyMsNow();
-    bool killed = false;
-    int status = 0;
-
-    auto drain = [&]() {
-        char chunk[4096];
-        for (;;)
-        {
-            const auto read = ::read(pipe_fds[0], chunk, sizeof(chunk));
-            if (read > 0)
-            {
-                buffer.Append(chunk, static_cast<std::size_t>(read));
-                continue;
-            }
-            break;
-        }
-    };
-
-    for (;;)
-    {
-        drain();
-        const auto waited = ::waitpid(pid, &status, WNOHANG);
-        if (waited == pid) break;
-        if (cancelled.load())
-        {
-            result.Cancelled = true;
-            killed = true;
-            ::kill(-pid, SIGKILL);
-            ::kill(pid, SIGKILL);
-            break;
-        }
-        if (SteadyMsNow() - started > timeout_ms)
-        {
-            result.TimedOut = true;
-            killed = true;
-            ::kill(-pid, SIGKILL);
-            ::kill(pid, SIGKILL);
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
-
-    if (killed) ::waitpid(pid, &status, 0);
-    drain();
-    ::close(pipe_fds[0]);
-
-    result.Output = buffer.ToString();
-    result.Truncated = buffer.Truncated();
-    result.ExitCode = killed ? -1 : (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-    if (result.ExitCode == 127 && Trim(result.Output).empty()) result.Error = "/bin/bash not available";
-    return result;
-}
-
-bool RestartSelf(const std::vector<std::string>& arguments)
-{
-    if (arguments.empty()) return false;
-    const pid_t pid = ::fork();
-    if (pid < 0) return false;
-    if (pid == 0)
-    {
-        ::setsid();
-        std::vector<char*> argv;
-        argv.reserve(arguments.size() + 1);
-        for (const auto& argument : arguments)
-        {
-            argv.push_back(const_cast<char*>(argument.c_str()));
-        }
-        argv.push_back(nullptr);
-        ::execv(argv[0], argv.data());
-        ::_exit(127);
-    }
-    return true;
-}
-
-bool SleepCancelable(int milliseconds, const std::atomic<bool>& cancelled)
-{
-    const auto deadline = SteadyMsNow() + milliseconds;
-    while (!cancelled.load() && SteadyMsNow() < deadline)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(
-            std::min<std::int64_t>(50, std::max<std::int64_t>(1, deadline - SteadyMsNow()))));
-    }
-    return !cancelled.load();
 }
 
 } // namespace staragent::platform

@@ -25,6 +25,17 @@ public class NodeController(NodeService nodeService, ITokenService tokenService,
 {
     private static DateTime _oldVersion = new(2025, 8, 26);
 
+    /// <summary>写日志。抑制短时间内的重复连接记录，避免客户端重连风暴冲垮历史表</summary>
+    /// <param name="action">动作名称</param>
+    /// <param name="success">是否成功</param>
+    /// <param name="message">消息内容</param>
+    public override void WriteLog(String action, Boolean success, String message)
+    {
+        if (!WebSocketHistoryFilter.TryAccept(Context?.ClientId, action, ref message)) return;
+
+        base.WriteLog(action, success, message);
+    }
+
     #region 令牌验证
     protected override Boolean OnAuthorize(String token, DeviceContext context)
     {
@@ -185,8 +196,10 @@ public class NodeController(NodeService nodeService, ITokenService tokenService,
 
             if (rs is MyPingResponse mrs)
             {
-                // 服务端设置节点的同步时间周期时，客户端会覆盖掉；服务端未设置时，不要覆盖客户端的同步参数
-                if (node.SyncTime > 0) mrs.SyncTime = node.SyncTime;
+                // 服务端设置节点的同步时间周期时，客户端会覆盖掉；服务端未设置时，不要覆盖客户端的同步参数。
+                // 节点级优先，未设置时沿用所属项目的统一配置，避免逐台节点配置
+                var syncTime = node.SyncTime > 0 ? node.SyncTime : node.Project?.SyncTime ?? 0;
+                if (syncTime > 0) mrs.SyncTime = syncTime;
             }
 
             // 令牌有效期检查，10分钟内到期的令牌，颁发新令牌，以获取业务的连续性。
@@ -218,10 +231,11 @@ public class NodeController(NodeService nodeService, ITokenService tokenService,
     #region 升级更新
     /// <summary>升级检查</summary>
     /// <param name="channel">更新通道。兼容旧版本客户端，允许为空，默认Release</param>
+    /// <param name="version">指定版本。控制台手工升级时传递，为空时按策略自动匹配</param>
     /// <returns></returns>
     [HttpGet(nameof(Upgrade))]
     [HttpPost(nameof(Upgrade))]
-    public IUpgradeInfo? Upgrade(String? channel)
+    public IUpgradeInfo? Upgrade(String? channel, String? version)
     {
         var node = Context.Device as Node;
 
@@ -230,7 +244,7 @@ public class NodeController(NodeService nodeService, ITokenService tokenService,
         var p = uri.IndexOf('/', "https://".Length);
         if (p > 0) uri = uri[..p];
 
-        var info = nodeService.Upgrade(Context, channel);
+        var info = nodeService.Upgrade(Context, channel, version);
         if (info == null)
         {
             nodeService.CheckDotNet(node, new Uri(uri), UserHost);
@@ -238,17 +252,54 @@ public class NodeController(NodeService nodeService, ITokenService tokenService,
             return null;
         }
 
-        // 为了兼容旧版本客户端，这里必须把路径处理为绝对路径
-        if (info != null && !info.Source.StartsWithIgnoreCase("http://", "https://"))
-        {
-            info.Source = new Uri(new Uri(uri), info.Source) + "";
-        }
-
-        // 安全V-11：升级包下载URL附带短时令牌
+        // 为了兼容旧版本客户端，这里必须把路径处理为绝对路径，并附加短时下载令牌（安全V-11）
         if (info != null && !info.Source.IsNullOrEmpty())
-            info.Source = downloadTokenService.AppendToken(info.Source, StarServerSetting.Current.AttachmentTokenExpire);
+            info.Source = DownloadSourceHelper.Absolutize(info.Source, uri, SignDownload);
 
         return info!;
+    }
+
+    /// <summary>给下载地址附加短时令牌</summary>
+    /// <param name="source">已补全的绝对地址</param>
+    /// <returns>带令牌的地址</returns>
+    private String SignDownload(String source) =>
+        downloadTokenService.AppendToken(source, StarServerSetting.Current.AttachmentTokenExpire);
+
+    /// <summary>引导安装。原生 Agent 获取 .NET 运行时与完整版 StarAgent 的安装包</summary>
+    /// <remarks>原生 Agent 只做采集与指令响应；需要完整能力时调用本接口取包，自行下载安装后切换到 .NET 版。</remarks>
+    /// <returns>引导安装信息；非原生 Agent 或服务端未维护安装包时返回null</returns>
+    [HttpGet(nameof(Bootstrap))]
+    [HttpPost(nameof(Bootstrap))]
+    public BootstrapModel? Bootstrap()
+    {
+        var node = Context.Device as Node;
+        var info = nodeService.GetBootstrap(node);
+        if (info == null) return null;
+
+        // 基础路径
+        var uri = Request.GetRawUrl().ToString();
+        var p = uri.IndexOf('/', "https://".Length);
+        if (p > 0) uri = uri[..p];
+
+        info.Server = uri;
+        info.Runtime = Absolutize(info.Runtime, uri);
+        info.Agent = Absolutize(info.Agent, uri);
+
+        return info;
+    }
+
+    /// <summary>把安装包相对路径补全为绝对地址，并附加短时下载令牌</summary>
+    /// <param name="pkg">安装包</param>
+    /// <param name="baseUri">服务端基础地址</param>
+    /// <returns>补全后的安装包</returns>
+    private BootstrapPackage? Absolutize(BootstrapPackage? pkg, String baseUri)
+    {
+        if (pkg == null) return pkg;
+
+        // 安全V-11：安装包下载URL附带短时令牌
+        pkg.Source = DownloadSourceHelper.Absolutize(pkg.Source, baseUri, SignDownload);
+
+        return pkg;
     }
     #endregion
 

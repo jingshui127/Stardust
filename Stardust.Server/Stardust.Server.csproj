@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>StarServer</AssemblyName>
     <AssemblyTitle>Stardust service platform</AssemblyTitle>
-    <Description>Backend core of the Stardust distributed service platform. Provides core API services for configuration center, registry, service discovery, remote deployment, performance monitoring, and log center, supporting application registration, configuration delivery, metric aggregation, statistics, and task scheduling, and can scale horizontally.</Description>
+    <Description>Backend core of the Stardust distributed service platform. Provides APIs for node management, application center, configuration center, registry and service discovery, monitoring and alerting, release center, gateway and MCP, together with metric aggregation, statistics and scheduled tasks; scales horizontally.</Description>
     <Company>新生命开发团队</Company>
     <Copyright>©2002-2026 NewLife</Copyright>
     <VersionPrefix>3.7</VersionPrefix>
@@ -32,8 +32,8 @@
 
   <ItemGroup>
     <PackageReference Include="NewLife.IP" Version="2.6.2026.1024" />
-    <PackageReference Include="NewLife.Redis" Version="7.0.2026.1024" />
-    <PackageReference Include="NewLife.Remoting.Extensions" Version="4.0.2026.1024" />
+    <PackageReference Include="NewLife.Redis" Version="7.0.2026.1026-beta0931" />
+    <PackageReference Include="NewLife.Remoting.Extensions" Version="4.0.2026.1109-beta0753" />
   </ItemGroup>
 
   <ItemGroup>
@@ -44,6 +44,14 @@
   <ItemGroup>
     <!-- Locales 目录由 NewLife.Core 源生成器编译期解析；本项目未直接引用 Core 包，显式挂载输入 -->
     <AdditionalFiles Include="$(MSBuildProjectDirectory)\Locales\*.yml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 安装引导页与安装脚本模板。虚拟路径固定，运行时按名称读取 -->
+    <EmbeddedResource Include="Resources\install.html" LogicalName="install.html" />
+    <EmbeddedResource Include="Resources\install-linux.tpl" LogicalName="install-linux.tpl" />
+    <EmbeddedResource Include="Resources\install-windows.tpl" LogicalName="install-windows.tpl" />
+    <EmbeddedResource Include="Resources\leaf.png" LogicalName="leaf.png" />
   </ItemGroup>
 
 </Project>

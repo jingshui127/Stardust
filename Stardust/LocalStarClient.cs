@@ -21,6 +21,7 @@ using TaskEx = System.Threading.Tasks.Task;
 namespace Stardust;
 
 /// <summary>本地星尘客户端。连接本机星尘代理StarAgent</summary>
+/// <remarks>代理返回的 JSON 字段名可能随宿主命名策略变化（PascalCase/camelCase），反序列化按不区分大小写匹配字段名</remarks>
 public class LocalStarClient
 {
     #region 属性
@@ -174,14 +175,14 @@ public class LocalStarClient
             args = Environment.CommandLine.TrimPrefix(ext).Trim();
         }
 
-        // 发起命令
-        var rs = _client.Invoke<String>("KillAndStart", new
+        // 发起命令。AOT 下匿名类型成员会被裁剪，改用字典封套，键名与接口保持一致
+        var rs = _client.Invoke<String>("KillAndStart", new Dictionary<String, Object?>
         {
-            processId = p.Id,
-            delay = 3,
-            fileName,
-            arguments = args,
-            workingDirectory = Environment.CurrentDirectory,
+            ["processId"] = p.Id,
+            ["delay"] = 3,
+            ["fileName"] = fileName,
+            ["arguments"] = args,
+            ["workingDirectory"] = Environment.CurrentDirectory,
         });
 
         // 本进程退出

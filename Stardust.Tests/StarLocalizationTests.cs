@@ -11,12 +11,16 @@ public class StarLocalizationTests : IDisposable
 {
     private readonly CultureInfo? _old = Localization.Culture;
     private readonly CultureInfo? _oldLog = Localization.LogCulture;
+    private readonly String? _oldForced = Localization.ForcedLanguage;
+    private readonly CultureInfo? _oldDefault = Localization.DefaultCulture;
 
     /// <summary>恢复原始语言</summary>
     public void Dispose()
     {
+        Localization.SetLanguage(_oldForced);
         Localization.Culture = _old;
         Localization.LogCulture = _oldLog;
+        Localization.SetDefaultLanguage(_oldDefault?.Name);
     }
 
     [Theory(DisplayName = "区域语言与裸语言码归一化到词表语言")]
@@ -69,8 +73,8 @@ public class StarLocalizationTests : IDisposable
     [Fact(DisplayName = "按语言设置进程界面与日志语言")]
     public void UseLanguageSetsProcessCulture()
     {
-        Localization.Culture = null;
-        Localization.LogCulture = null;
+        Localization.SetLanguage(null);
+        Localization.SetDefaultLanguage(null);
 
         Assert.Equal("ja", StarLocalization.UseLanguage("ja-JP"));
         Assert.Equal("ja", Localization.Culture?.Name);
@@ -79,5 +83,51 @@ public class StarLocalizationTests : IDisposable
         // 不支持的语言不改动现有设置
         Assert.Null(StarLocalization.UseLanguage("sw-KE"));
         Assert.Equal("ja", Localization.Culture?.Name);
+    }
+
+    [Fact(DisplayName = "启动初始化只设置日志语言，界面语言保持自动识别")]
+    public void InitLogCultureSetsLogCultureOnly()
+    {
+        var saved = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("zh-CN");
+            Localization.SetLanguage(null);
+            Localization.SetDefaultLanguage(null);
+            Localization.Culture = null;
+            Localization.LogCulture = null;
+
+            StarLocalization.InitLogCulture();
+
+            // 日志语言取宿主语言，配置文件注释才不会先英文后中文
+            Assert.Equal("zh-CN", Localization.LogCulture?.Name);
+            // 界面语言保持自动识别（跟随请求），不能被固定成宿主语言
+            Assert.Null(Localization.Culture);
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = saved;
+        }
+    }
+
+    [Fact(DisplayName = "已有显式语言时启动初始化不覆盖")]
+    public void InitLogCultureKeepsExplicitCulture()
+    {
+        var saved = CultureInfo.CurrentUICulture;
+        try
+        {
+            CultureInfo.CurrentUICulture = CultureInfo.GetCultureInfo("zh-CN");
+            Localization.SetLanguage(null);
+            Localization.SetDefaultLanguage("ja");
+
+            StarLocalization.InitLogCulture();
+
+            // 站点默认语言已由配置写入时，启动初始化不再覆盖日志语言
+            Assert.Null(Localization.LogCulture);
+        }
+        finally
+        {
+            CultureInfo.CurrentUICulture = saved;
+        }
     }
 }

@@ -6,10 +6,13 @@
 #include "protocol.hpp"
 #include "util.hpp"
 
+#include <atomic>
 #include <cstdlib>
+#include <cmath>
 #include <filesystem>
 #include <iostream>
 #include <string>
+#include <thread>
 
 namespace {
 
@@ -101,6 +104,67 @@ void TestPingResponse()
     Check(response.Commands[0].Expire.IsSet(), "ping command expire");
 }
 
+void TestPingJson()
+{
+    staragent::PingInfo ping;
+    ping.ProcessCount = 12;
+    ping.TcpConnections = 34;
+    ping.TcpTimeWait = 5;
+    ping.TcpCloseWait = 6;
+    ping.Temperature = 42.5;
+    ping.Signal = 66;
+    ping.DiskIOPS = 180;
+    ping.DiskActiveTime = 12.5;
+    ping.GatewayLatency = 3;
+    ping.GatewayLossRate = 0.2;
+    ping.IntranetScore = 0.91;
+    ping.InternetScore = 0.88;
+
+    const auto json = staragent::ToJson(ping);
+    Check(json["ProcessCount"] == 12, "ping json process count");
+    Check(json["TcpConnections"] == 34, "ping json tcp connections");
+    Check(json["TcpTimeWait"] == 5, "ping json tcp time wait");
+    Check(json["TcpCloseWait"] == 6, "ping json tcp close wait");
+    Check(json["Temperature"] == 42.5, "ping json temperature");
+    Check(json["Signal"] == 66, "ping json signal");
+    Check(json["DiskIOPS"] == 180, "ping json disk iops");
+    Check(json["DiskActiveTime"] == 12.5, "ping json disk active time");
+    Check(json["GatewayLatency"] == 3, "ping json gateway latency");
+    Check(json["GatewayLossRate"] == 0.2, "ping json gateway loss");
+    Check(json["IntranetScore"] == 0.91, "ping json intranet score");
+    Check(json["InternetScore"] == 0.88, "ping json internet score");
+}
+
+void TestMd5()
+{
+    Check(staragent::Md5Hex("") == "d41d8cd98f00b204e9800998ecf8427e", "md5 empty");
+    Check(staragent::Md5Hex("abc") == "900150983cd24fb0d6963f7d28e17f72", "md5 abc");
+    Check(staragent::Md5Hex("The quick brown fox jumps over the lazy dog") ==
+              "9e107d9d372bb6826bd81d3542a419d6",
+          "md5 quick brown fox");
+}
+
+void TestPingScore()
+{
+    // 与 .NET PingMonitor 一致的指数衰减：1ms 满分，100ms ≈ 0.906
+    Check(std::abs(staragent::ComputePingScore(1, 5, 5) - 1.0) < 0.001, "ping score full at 1ms");
+    Check(std::abs(staragent::ComputePingScore(100, 5, 5) - 0.906) < 0.002, "ping score decay at 100ms");
+    Check(std::abs(staragent::ComputePingScore(10, 3, 5) - 0.595) < 0.002, "ping score applies loss rate");
+    Check(staragent::ComputePingScore(10, 0, 5) == 0, "ping score zero on full loss");
+    Check(staragent::ComputePingScore(10, 1, 0) == 0, "ping score zero on empty sample");
+}
+
+void TestPercentRatio()
+{
+    // 服务端 percent 字段存 0~1、展示时乘 100，客户端必须把百分比除成比例
+    Check(staragent::PercentToRatio(24.66) == 0.2466, "cpu percent to ratio");
+    Check(staragent::PercentToRatio(100) == 1.0, "full percent to ratio");
+    Check(staragent::PercentToRatio(150) == 1.0, "percent above 100 is clamped");
+    Check(staragent::PercentToRatio(-5) == 0.0, "negative percent is clamped");
+    Check(staragent::RoundTo(27.850000000000023, 1) == 27.9, "temperature rounded to one decimal");
+    Check(staragent::RoundTo(27.24, 1) == 27.2, "temperature rounded down");
+}
+
 void TestTruncate()
 {
     std::string large(100 * 1024, 'a');
@@ -159,6 +223,15 @@ void TestConfig()
     staragent::ConfigStore store(path, loaded);
     store.Update([](staragent::Config& value) { value.Channel = "Beta"; });
     Check(staragent::LoadConfig(path).Channel == "Beta", "config store update persisted");
+
+    // 本地端口与已升级版本需要在重启后保持，否则升级会反复触发
+    store.Update([](staragent::Config& value) {
+        value.LocalPort = 5501;
+        value.UpgradeVersion = "1.0.2026.1102";
+    });
+    const auto after_upgrade = staragent::LoadConfig(path);
+    Check(after_upgrade.LocalPort == 5501, "local port persisted");
+    Check(after_upgrade.UpgradeVersion == "1.0.2026.1102", "upgrade version persisted");
 }
 
 void TestEventQueue()
@@ -246,6 +319,34 @@ void TestExecutor()
     Check(replies.size() == 4 && replies[3].Status == 3, "shell disabled by default");
     Check(replies[3].Data == "命令执行未启用", "shell disabled message");
 
+    // 引导安装默认关闭，开启后异步执行并先回复“正在引导安装”
+    staragent::CommandModel bootstrap;
+    bootstrap.Id = 104;
+    bootstrap.Command = "node/bootstrap";
+    executor.Handle(bootstrap, collect);
+    Check(replies.size() == 5 && replies[4].Status == 3, "bootstrap disabled by default");
+    Check(replies[4].Data == "引导安装未启用", "bootstrap disabled message");
+
+    staragent::ExecutorOptions boot_options;
+    boot_options.TimeoutSeconds = 1;
+    std::atomic<int> bootstrap_calls{0};
+    boot_options.Bootstrap = [&bootstrap_calls]() {
+        bootstrap_calls++;
+        return std::string();
+    };
+    staragent::Executor boot_executor(boot_options);
+    std::vector<staragent::CommandReplyModel> boot_replies;
+    staragent::CommandModel boot_command;
+    boot_command.Id = 105;
+    boot_command.Command = "node/bootstrap";
+    boot_executor.Handle(boot_command, [&](const staragent::CommandReplyModel& reply) {
+        boot_replies.push_back(reply);
+    });
+    Check(boot_replies.size() == 1 && boot_replies[0].Status == 2, "bootstrap accepted when enabled");
+    std::this_thread::sleep_for(std::chrono::milliseconds(900));
+    Check(bootstrap_calls.load() == 1, "bootstrap callback invoked");
+    boot_executor.Stop();
+
     executor.Stop();
 }
 
@@ -288,6 +389,10 @@ int main()
     TestProtocolTime();
     TestUnwrapResponse();
     TestPingResponse();
+    TestPingJson();
+    TestMd5();
+    TestPingScore();
+    TestPercentRatio();
     TestTruncate();
     TestUrls();
     TestConfig();

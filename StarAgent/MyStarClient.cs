@@ -1,4 +1,5 @@
 ﻿using System.Diagnostics;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using NewLife;
 using NewLife.Agent;
@@ -92,12 +93,25 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
 
     #region 心跳
     private DateTime _lastSync;
+    private DateTime _lastClockWarn;
     protected override async Task OnPing(Object state)
     {
         await base.OnPing(state);
 
-        // 上报设备侧自愈记录（救援脚本恢复代理后留下的标记；见 SmartIPC 固件 staragent-rescue 机制）
-        CheckRescueFlag();
+        // 本机时钟偏差超过盐值窗口时，登录会因盐值过期失败。客户端已改用服务端时间生成盐值（无需修改系统时钟），
+        // 这里只上报一条限流告警，提示运维修 NTP——改系统时钟是特权操作，容器内还会影响宿主机与同机所有服务。
+        if (Span.TotalMilliseconds != 0 && Math.Abs(Span.TotalMilliseconds) > 60_000 && _lastClockWarn.AddHours(6) < DateTime.Now)
+        {
+            _lastClockWarn = DateTime.Now;
+
+            var msg = L.TLog("Clock skew {0:n0}ms exceeds the salt window; fix NTP on this node.", Span.TotalMilliseconds);
+            // 事件名与 Stardust.Data.HistoryAction.ClockSkew 保持一致，便于平台按动作筛选与翻译（StarAgent 不引用 Stardust.Data）
+            this.WriteEvent("warn", "Clock skew", msg);
+            WriteLog(msg);
+        }
+
+        // 心跳成功后上报本地事件台账，上报失败的事件留在台账等下一次心跳
+        await EventLedger.ReportAsync(this, EventLedger.GetDirectory(), EventLedger.NodeEvents, "StarAgentReportFailed");
 
         var syncTime = AgentSetting.SyncTime;
         if (syncTime > 0 && Span.TotalMilliseconds != 0)
@@ -138,45 +152,87 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
 
         return rs;
     }
-
-    /// <summary>上报设备侧自愈记录</summary>
-    /// <remarks>
-    /// SmartIPC 固件的巡检服务（newlife-starcare.timer）发现代理异常时，会用内置救援副本恢复代理，
-    /// 并写入 /var/lib/newlife/starrescue.flag 记录救援原因与结果；代理恢复上线后读取该标记，
-    /// 作为节点事件上报到星尘平台，随后删除标记（只上报一次）。
-    /// </remarks>
-    private void CheckRescueFlag()
-    {
-        // 仅 Linux 设备（救援机制随固件部署），Windows 服务跳过
-        if (!Runtime.Linux) return;
-
-        try
-        {
-            var flag = "/var/lib/newlife/starrescue.flag";
-            if (!File.Exists(flag)) return;
-
-            var content = File.ReadAllText(flag);
-
-            // 先上报再删除：入队失败时保留标记，下次心跳重试
-            this.WriteInfoEvent("Rescue", L.T("Stardust agent self-healing completed: {0}", content));
-            WriteLog("Reported device-side self-healing record: {0}", content);
-
-            File.Delete(flag);
-        }
-        catch (Exception ex)
-        {
-            // 上报失败不影响心跳主流程
-            XTrace.WriteException(ex);
-        }
-    }
     #endregion
 
     #region 更新
+    private static Boolean _aotUpgradeWarned;
+
+    /// <summary>是否以 NativeAOT 方式运行（无动态代码能力）</summary>
+    private static Boolean IsNativeAot
+    {
+        get
+        {
+#if NET5_0_OR_GREATER
+            return !System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported;
+#else
+            return false;
+#endif
+        }
+    }
+
     public override Task<IUpgradeInfo?> Upgrade(String? channel, CancellationToken cancellationToken = default)
     {
         if (channel.IsNullOrEmpty()) channel = AgentSetting.Channel;
 
         return base.Upgrade(channel, cancellationToken);
+    }
+
+    /// <summary>向服务端查询升级信息。在基类纯查询前后输出本地版本、服务端返回与对比结论，让日志能直接回答「要不要更新」</summary>
+    /// <remarks>周期轮询与 node/upgrade 命令两条路径都经由 Upgrade→UpgradeAsync，此处一处覆盖。下载/覆盖/回滚仍由基类 Upgrade 处理，不受影响。</remarks>
+    /// <param name="channel">更新通道</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>服务端升级信息，无更新时为空</returns>
+    protected override async Task<IUpgradeInfo?> UpgradeAsync(String? channel, CancellationToken cancellationToken = default)
+    {
+        // NativeAOT 单体程序不能被平台下发的托管程序集包覆盖（覆盖后会静默退回 JIT 版），自动更新直接跳过
+        if (IsNativeAot)
+        {
+            if (!_aotUpgradeWarned)
+            {
+                _aotUpgradeWarned = true;
+                WriteLog("NativeAOT build: automatic upgrade is disabled because the platform distributes managed assembly packages that cannot replace a native executable. Deploy the native package manually instead.");
+            }
+
+            return null;
+        }
+
+        var local = GetLocalVersion();
+        WriteLog("Upgrade check: local version={0}, channel={1}, querying the server...", local, channel);
+
+        var info = await base.UpgradeAsync(channel, cancellationToken);
+        if (info == null || info.Version.IsNullOrEmpty())
+        {
+            WriteLog("Upgrade check result: no update available on the server (local version={0}, channel={1}). If an update is expected, verify the product version/release package on the platform: enabled, channel matches, product code matches, and the release package target runtime matches the node runtime.", local, channel);
+            return info;
+        }
+
+        var same = info.Version.EqualIgnoreCase(local);
+        var status = same ? L.TLog("Version is the same; no update needed") : L.TLog("Update required; preparing to download");
+        if (info is UpgradeInfo ui)
+            WriteLog("Upgrade check result: latest server version={0}, local version={1}, {2}. Source={3}, size={4}, MD5={5}, Force={6}",
+                info.Version, local, status,
+                info.Source, ui.FileSize, info.FileHash, ui.Force);
+        else
+            WriteLog("Upgrade check result: latest server version={0}, local version={1}, {2}. Source={3}, MD5={4}",
+                info.Version, local, status,
+                info.Source, info.FileHash);
+
+        return info;
+    }
+
+    private String? _localVersion;
+    /// <summary>本地版本。取主程序集文件版本（如 3.7.2026.1103），与节点登录上报及平台「产品版本」的 Version 同源</summary>
+    /// <returns></returns>
+    private String GetLocalVersion()
+    {
+        if (_localVersion.IsNullOrEmpty())
+        {
+            var asm = typeof(MyStarClient).Assembly;
+            _localVersion = asm.GetCustomAttribute<AssemblyFileVersionAttribute>()?.Version
+                ?? asm.GetName().Version?.ToString();
+        }
+
+        return _localVersion!;
     }
 
     protected override void Restart(Upgrade upgrade)
@@ -192,17 +248,23 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
         var p = Process.GetCurrentProcess();
         this.WriteInfoEvent("Upgrade", $"Restart: exeName={exeName} ProcessName={p.ProcessName} MainModule={p.MainModule?.FileName}");
 
+        // 预检：提前判断新版本能否在本机跑起来，用于记录具体原因、跳过注定失败的重试。
+        // 它不作为是否重启服务的依据——升级失败时唯一正确的动作是回滚旧版、保持当前进程运行
+        var unableToRun = UpgradePreflight.CheckRuntime(upgrade.DestinationPath, exeName);
+        if (unableToRun != null) WriteLog("Upgrade preflight failed: {0}", unableToRun);
+
         // 以服务方式运行时，重启服务，否则采取拉起进程的方式
         if (inService || Service.Host is DefaultHost host && host.InService)
         {
-            this.WriteInfoEvent("Upgrade", L.T("Forced update completed; restarting the background service. PID={0}", pid));
+            this.WriteInfoEvent("Upgrade", L.TLog("Forced update completed; restarting the background service. PID={0}", pid));
 
             // 冒烟测试：尝试拉起新版，若失败等 5s 重试一次（应对慢速存储落盘 / JIT 预热）
+            // 预检已判定跑不起来时不再重试，避免无谓等待
             var rs = upgrade.Run(exeName, "-restart -upgrade", 3_000);
-            if (!rs)
+            if (!rs && unableToRun == null)
             {
                 var delay = 5_000;
-                this.WriteInfoEvent("Upgrade", L.T("The new version failed to start for the first time; retrying in {0}ms. {1}", delay, upgrade.LastErrorMessage));
+                this.WriteInfoEvent("Upgrade", L.TLog("The new version failed to start for the first time; retrying in {0}ms. {1}", delay, upgrade.LastErrorMessage));
                 Thread.Sleep(delay);
                 rs = upgrade.Run(exeName, "-restart -upgrade", 3_000);
             }
@@ -210,25 +272,28 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
             //!! 这里不需要自杀，外部命令重启服务会结束当前进程
             if (rs)
             {
-                this.WriteInfoEvent("Upgrade", L.T("Forced update completed; the new process has been launched, waiting for the current service to restart."));
+                var msg = L.TLog("Forced update completed; the new process has been launched, waiting for the current service to restart.");
+                this.WriteInfoEvent("Upgrade", msg);
+                ConfirmUpgrade(msg);
             }
             else
             {
-                // 两次均失败，确认新版有致命缺陷，回滚 .del 恢复旧版文件
+                // 冒烟失败说明新版有致命缺陷，回滚 .del 恢复旧版文件，当前进程继续运行。
+                // 不能改用重启服务兜底：服务重启会结束当前进程，而新版已证明跑不起来，节点将彻底失联且再无机会回滚
                 upgrade.Rollback();
-                this.WriteInfoEvent("Upgrade", L.T("The new version failed to start (smoke test failed); the old files have been rolled back and the current service keeps running. {0}", upgrade.LastErrorMessage));
+                FailUpgrade(L.TLog("The new version failed to start (smoke test failed); the old files have been rolled back and the current service keeps running. {0}", BuildFailure(upgrade, unableToRun)));
             }
         }
         else
         {
-            this.WriteInfoEvent("Upgrade", L.T("Forced update completed; launching the new process. PID={0}", pid));
+            this.WriteInfoEvent("Upgrade", L.TLog("Forced update completed; launching the new process. PID={0}", pid));
 
             // 冒烟测试：尝试拉起新版，若失败等 5s 重试一次
             var rs = upgrade.Run(exeName, "-run -upgrade", 3_000);
-            if (!rs)
+            if (!rs && unableToRun == null)
             {
                 var delay = 5_000;
-                this.WriteInfoEvent("Upgrade", L.T("The new version failed to start for the first time; retrying in {0}ms. {1}", delay, upgrade.LastErrorMessage));
+                this.WriteInfoEvent("Upgrade", L.TLog("The new version failed to start for the first time; retrying in {0}ms. {1}", delay, upgrade.LastErrorMessage));
                 Thread.Sleep(delay);
                 rs = upgrade.Run(exeName, "-run -upgrade", 3_000);
             }
@@ -237,24 +302,65 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
             {
                 Service.StopWork("Upgrade");
 
-                this.WriteInfoEvent("Upgrade", L.T("Forced update completed; the new process has been launched and the current process is about to exit. PID={0}", pid));
+                var msg = L.TLog("Forced update completed; the new process has been launched and the current process is about to exit. PID={0}", pid);
+                this.WriteInfoEvent("Upgrade", msg);
+                ConfirmUpgrade(msg);
 
                 upgrade.KillSelf();
             }
             else
             {
-                // 两次均失败，确认新版有致命缺陷，回滚 .del 恢复旧版文件
+                // 冒烟失败说明新版有致命缺陷，回滚 .del 恢复旧版文件，当前进程继续运行
                 upgrade.Rollback();
-                this.WriteInfoEvent("Upgrade", L.T("The new version failed to start (smoke test failed); the old files have been rolled back and the current service keeps running. {0}", upgrade.LastErrorMessage));
+                FailUpgrade(L.TLog("The new version failed to start (smoke test failed); the old files have been rolled back and the current service keeps running. {0}", BuildFailure(upgrade, unableToRun)));
             }
         }
     }
 
+    /// <summary>确认升级完成。写入本地事件台账，由心跳上报服务端，停止按退避间隔重复下发</summary>
+    /// <remarks>
+    /// 强制升级需要重启进程才算完成，基类不会在覆盖文件后上报 success；重启后上报的版本号又可能因为
+    /// 安装包内容与当前版本一致（节点本来就在目标版本）而保持不变，服务端据此判定升级未完成，
+    /// 按 10min/30min/2h/6h/24h 反复下发同一份安装包。
+    /// <para>确认口径：拉起的新版进程存活 3 秒（冒烟测试通过）即视为升级成功——U 与新版是同一份二进制，
+    /// 它能起来就说明宿主与入口点可用，内部流程由发版测试保证。冒烟失败时回滚并写 error，服务端立即重试。</para>
+    /// <para>写入时机必须在冒烟通过之后、交接之前：拉起前写只证明“文件复制完成”，U 可能根本起不来；
+    /// 新版进程的 -upgrade 等待 6 秒再重启服务，为这里留出确定的落盘窗口，避免事件被重启打断。</para>
+    /// </remarks>
+    /// <param name="message">事件内容</param>
+    private static void ConfirmUpgrade(String message) => EventLedger.Append(EventLedger.GetDirectory(), EventLedger.NodeEvents, "success", "Upgrade", message);
+    /// <summary>升级失败。写入本地事件台账，服务端收到后清空指纹并允许立即重试</summary>
+    /// <param name="message">失败原因</param>
+    private static void FailUpgrade(String message) => EventLedger.Append(EventLedger.GetDirectory(), EventLedger.NodeEvents, "error", "Upgrade", message);
+
+    /// <summary>组装升级失败原因</summary>
+    /// <remarks>
+    /// 预检结论必须带上：缺运行时等场景冒烟测试只会得到“退出码150（无错误输出）”，
+    /// 平台节点历史里看不到根因，运维只能登录机器翻本地日志。
+    /// </remarks>
+    /// <param name="upgrade">升级对象</param>
+    /// <param name="preflight">预检结论，可为空</param>
+    /// <returns>失败原因</returns>
+    private static String BuildFailure(Upgrade upgrade, String? preflight)
+    {
+        var reason = upgrade.LastErrorMessage + "";
+        if (preflight.IsNullOrEmpty()) return reason;
+        if (reason.IsNullOrEmpty()) return preflight;
+
+        return $"{preflight}; {reason}";
+    }
     /// <summary>获取当前进程可执行文件名（不含扩展名），支持重命名场景。dotnet/mono 宿主下返回真正目标程序集名</summary>
+    /// <remarks>
+    /// 升级过程会把正在使用的 exe/dll 改名为 *.del，此后 <see cref="Process.ProcessName"/> 会带上 .del 后缀
+    /// （实测为 StarAgent.exe.del），据此拼路径得到 StarAgent.exe.del.exe，必然找不到文件，导致升级完成后无法拉起新进程。
+    /// 入口程序集名是编译期确定的，与磁盘文件改名无关，故优先使用，进程名仅作兜底。
+    /// </remarks>
     private static String GetExecutableName()
     {
-        // 获取进程名（不含扩展名），再防御性清理可能混入的后缀
-        var name = Process.GetCurrentProcess().GetProcessName() ?? "StarAgent";
+        var name = Assembly.GetEntryAssembly()?.GetName().Name;
+        if (name.IsNullOrEmpty()) name = Process.GetCurrentProcess().GetProcessName();
+        if (name.IsNullOrEmpty()) return "StarAgent";
+
         return name.TrimSuffix(".exe", ".dll", ".del");
     }
 
@@ -402,6 +508,13 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
     }
 
     /// <summary>同步时间</summary>
+    /// <remarks>
+    /// 仅由平台/人工下发的 node/synctime 命令，或运维配置的同步周期触发，代理不会擅自修改系统时钟。
+    /// 鉴权已改用服务端时间生成盐值，本机时钟偏差不会再导致登录失败。
+    /// 改钟成功后立即重算客户端时间差，保证 GetNow() 与 Runtime.UtcNow 当场回到零偏差。
+    /// </remarks>
+    /// <param name="argument">指令参数。可指定目标时间</param>
+    /// <returns>执行结果</returns>
     public String? SyncTime(String? argument = null)
     {
         var now = DateTime.Now;
@@ -417,23 +530,22 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
         var ts = now - time;
         if (Math.Abs(ts.TotalMilliseconds) < 1000) return L.T("No synchronization required.");
 
-        var msg = L.T("Synchronized time: {0}, offset: {1}", time.ToFullString(), ts);
+        var msg = L.TLog("Synchronized time: {0}, offset: {1}", time.ToFullString(), ts);
         WriteLog(msg);
-        WriteEvent("info", "SyncTime", msg);
-        time = time.ToUniversalTime();
 
+        var utc = time.ToUniversalTime();
         var rs = L.T("Unsupported system!");
         if (Runtime.Windows)
         {
             var st = new SYSTEMTIME
             {
-                Year = (Int16)time.Year,
-                Month = (Int16)time.Month,
-                Day = (Int16)time.Day,
-                Hour = (Int16)time.Hour,
-                Minute = (Int16)time.Minute,
-                Second = (Int16)time.Second,
-                Milliseconds = (Int16)time.Millisecond
+                Year = (Int16)utc.Year,
+                Month = (Int16)utc.Month,
+                Day = (Int16)utc.Day,
+                Hour = (Int16)utc.Hour,
+                Minute = (Int16)utc.Minute,
+                Second = (Int16)utc.Second,
+                Milliseconds = (Int16)utc.Millisecond
             };
 
             if (!SetSystemTime(ref st))
@@ -443,22 +555,29 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
         }
         else if (Runtime.Linux)
         {
-            rs = "date".Execute($"-u -s \"{time:yyyy-MM-dd HH:mm:ss}\"", 5_000);
-
-            // 时间偏差较大时，需要写入RTC时钟，否则时间会被硬件时钟覆盖
-            if (Math.Abs(ts.TotalSeconds) > 60)
-            {
-                rs += ", " + "hwclock".Execute("-u -w", 5_000);
-            }
+            rs = "date".Execute($"-u -s \"{utc:yyyy-MM-dd HH:mm:ss}\"", 5_000);
         }
         else if (Runtime.OSX)
         {
             // macOS 修改系统时间需要 root 权限，-n 禁止交互式密码输入，避免命令挂起
-            rs = "sudo".Execute($"-n date -u -s \"{time:yyyy-MM-dd HH:mm:ss}\"", 5_000);
-            if (rs.IsNullOrEmpty()) rs = L.T("Synchronization failed; root permission is required. Run manually: sudo date -u -s \"{0}\"", time.ToString("yyyy-MM-dd HH:mm:ss"));
+            rs = "sudo".Execute($"-n date -u -s \"{utc:yyyy-MM-dd HH:mm:ss}\"", 5_000);
+            if (rs.IsNullOrEmpty()) rs = L.T("Synchronization failed; root permission is required. Run manually: sudo date -u -s \"{0}\"", utc.ToString("yyyy-MM-dd HH:mm:ss"));
         }
 
-        WriteLog(rs);
+        // 以“时钟是否真的被改到目标时间”为准。date/sudo 失败时只返回错误文本而不抛异常，不能据此当成功
+        var ok = Math.Abs((DateTime.Now - time).TotalSeconds) < 5;
+
+        // 时间偏差较大时，需要写入RTC时钟，否则时间会被硬件时钟覆盖
+        if (ok && Runtime.Linux && Math.Abs(ts.TotalSeconds) > 60)
+        {
+            rs += ", " + "hwclock".Execute("-u -w", 5_000);
+        }
+
+        // 系统时钟已被改成服务端时间，必须立刻重算时间差，否则 GetNow()/Runtime.UtcNow/鉴权盐值会把旧偏差再叠一次
+        if (ok) FixTime(0, time.ToUniversalTime().ToLong());
+
+        WriteEvent(ok ? "info" : "error", "SyncTime", ok ? msg : L.TLog("Time synchronization failed: {0}", rs));
+        WriteLog("{0}", rs);
 
         return rs;
     }
@@ -512,7 +631,7 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
         // 审计日志：记录命令执行前的信息
         var now = DateTime.Now;
         WriteLog("Executing Bash command: {0}, timeout: {1}ms", cmd, timeout);
-        WriteEvent("warn", "RunBash", L.T("Executing command: {0}, timeout: {1}ms, time: {2}", cmd, timeout, now.ToString("yyyy-MM-dd HH:mm:ss")));
+        WriteEvent("warn", "RunBash", L.TLog("Executing command: {0}, timeout: {1}ms, time: {2}", cmd, timeout, now.ToString("yyyy-MM-dd HH:mm:ss")));
 
         var sw = Stopwatch.StartNew();
         try
@@ -523,7 +642,7 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
             // 审计日志：记录成功执行的详细信息（输出过长时截断）
             var resultPreview = rs?.Length > 1000 ? rs.Substring(0, 1000) + "..." : rs;
             WriteLog("Execution succeeded, elapsed: {0}ms, output length: {1}", sw.ElapsedMilliseconds, rs?.Length ?? 0);
-            WriteEvent("info", "RunBash", L.T("Execution succeeded, command: {0}, elapsed: {1}ms, output length: {2}", cmd, sw.ElapsedMilliseconds, rs?.Length ?? 0));
+            WriteEvent("info", "RunBash", L.TLog("Execution succeeded, command: {0}, elapsed: {1}ms, output length: {2}", cmd, sw.ElapsedMilliseconds, rs?.Length ?? 0));
 
             return rs;
         }
@@ -533,7 +652,7 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
 
             // 审计日志：记录失败信息
             WriteLog("Execution failed: {0}, elapsed: {1}ms", ex.Message, sw.ElapsedMilliseconds);
-            WriteEvent("error", "RunBash", L.T("Execution failed, command: {0}, elapsed: {1}ms, error: {2}", cmd, sw.ElapsedMilliseconds, ex.Message));
+            WriteEvent("error", "RunBash", L.TLog("Execution failed, command: {0}, elapsed: {1}ms, error: {2}", cmd, sw.ElapsedMilliseconds, ex.Message));
 
             return L.T("Command execution failed: {0}", ex.Message);
         }
@@ -572,7 +691,7 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
         // 审计日志：记录命令执行前的信息
         var now = DateTime.Now;
         WriteLog("Executing CMD command: {0}, timeout: {1}ms", cmd, timeout);
-        WriteEvent("warn", "RunCmd", L.T("Executing command: {0}, timeout: {1}ms, time: {2}", cmd, timeout, now.ToString("yyyy-MM-dd HH:mm:ss")));
+        WriteEvent("warn", "RunCmd", L.TLog("Executing command: {0}, timeout: {1}ms, time: {2}", cmd, timeout, now.ToString("yyyy-MM-dd HH:mm:ss")));
 
         var sw = Stopwatch.StartNew();
         try
@@ -583,7 +702,7 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
             // 审计日志：记录成功执行的详细信息（输出过长时截断）
             var resultPreview = rs?.Length > 1000 ? rs.Substring(0, 1000) + "..." : rs;
             WriteLog("Execution succeeded, elapsed: {0}ms, output length: {1}", sw.ElapsedMilliseconds, rs?.Length ?? 0);
-            WriteEvent("info", "RunCmd", L.T("Execution succeeded, command: {0}, elapsed: {1}ms, output length: {2}", cmd, sw.ElapsedMilliseconds, rs?.Length ?? 0));
+            WriteEvent("info", "RunCmd", L.TLog("Execution succeeded, command: {0}, elapsed: {1}ms, output length: {2}", cmd, sw.ElapsedMilliseconds, rs?.Length ?? 0));
 
             return rs;
         }
@@ -593,7 +712,7 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
 
             // 审计日志：记录失败信息
             WriteLog("Execution failed: {0}, elapsed: {1}ms", ex.Message, sw.ElapsedMilliseconds);
-            WriteEvent("error", "RunCmd", L.T("Execution failed, command: {0}, elapsed: {1}ms, error: {2}", cmd, sw.ElapsedMilliseconds, ex.Message));
+            WriteEvent("error", "RunCmd", L.TLog("Execution failed, command: {0}, elapsed: {1}ms, error: {2}", cmd, sw.ElapsedMilliseconds, ex.Message));
 
             return L.T("Command execution failed: {0}", ex.Message);
         }

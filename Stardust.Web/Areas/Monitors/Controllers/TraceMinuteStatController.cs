@@ -10,6 +10,7 @@ using static Stardust.Data.Monitors.TraceMinuteStat;
 
 namespace Stardust.Web.Areas.Monitors.Controllers;
 
+/// <summary>追踪分钟统计。按分钟汇总的接口调用指标</summary>
 [Menu(0, false)]
 [MonitorsArea]
 public class TraceMinuteStatController : ReadOnlyEntityController<TraceMinuteStat>
@@ -31,7 +32,7 @@ public class TraceMinuteStatController : ReadOnlyEntityController<TraceMinuteSta
         var start = p["dtStart"].ToDateTime();
         var end = p["dtEnd"].ToDateTime();
         var date = p["date"].ToDateTime();
-        if (start.Year < 2000 && end.Year < 2000) start = end = date;
+        MonitorSearchHelper.ResolveDateRange(appId, itemId, date, ref start, ref end);
 
         // 选了应用，没有选时间，按照统计日期升序
         if (appId >= 0 && start.Year < 2000 && p.Sort.IsNullOrEmpty())
@@ -48,7 +49,7 @@ public class TraceMinuteStatController : ReadOnlyEntityController<TraceMinuteSta
             p.PageSize = 24 * 60 / 5;
         }
 
-        if (appId > 0) p.RetrieveState = true;
+        if (MonitorSearchHelper.NeedState(appId)) p.RetrieveState = true;
 
         // 标记热门应用，缩短统计计算周期
         if (appId > 0) _hotApp.SetHotAppAsync(appId);

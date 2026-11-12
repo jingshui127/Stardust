@@ -112,6 +112,8 @@
 | `MaxFails` | 2880 | 最大失败队列长度（约2天） |
 | `TrimSelf` | true | 剔除埋点上报自身的调用 |
 | `EnableMeter` | true | 是否收集应用性能信息 |
+| `EnableOpenTelemetry` | true | 是否采集第三方组件的 OpenTelemetry 埋点 |
+| `EnableTagSanitize` | true | 上报前是否脱敏标签里的连接串与凭据 |
 
 ### 3.2 上报数据结构
 
@@ -176,6 +178,21 @@ WebApi 请求的埋点名称由 `TracerMiddleware`（`Stardust.Extensions\Tracer
 - **只丢弃当前片段**：同一条链路里由 `DiagnosticListener`、`OpenTelemetryCollector`、XCode 产生的片段不受影响，需要整链过滤时应在采集端按 TraceId 处理。
 - **只省上报不省创建**：埋点对象与请求头标签已经产生，扫描洪峰下的创建开销依然存在；要在创建前拦截，可让 `ITracer.Resolver.ResolveName` 对探测路径返回空以跳过埋点。
 - **星尘档是落地能力**：`DefaultSpan.Abandon` 会归还片段上下文；OpenTelemetry 档的活动归 SDK 管理，不作为承诺。
+
+### 3.5 OpenTelemetry 埋点采集与治理
+
+`StarTracer.AttachGlobal()` 挂载 NewLife.Core 的 `OpenTelemetryCollector`，把进程内第三方组件的 `Activity` 转成星尘埋点，命名规则为 `{ActivitySource}:{DisplayName}`。
+
+**默认排除已被自研埋点覆盖的源**（`StarTracer.DefaultExcludeSources`，在采集器自带排除项之上追加）：
+
+| 活动源 | 与谁重复 |
+|--------|----------|
+| `Microsoft.AspNetCore*` | 追踪中间件产出的服务端埋点。两者是同一父级下的兄弟节点（实测同一次请求出现两条同耗时段），按“父耗时减子耗时”计算时会重复计入 |
+| `connector-net*`、`MySqlConnector`、`Npgsql`、`Oracle.ManagedDataAccess*` | XCode 的 `db:库:操作:实体` 埋点（直接带 SQL 文本，信息量更大）；连接活动还会把连接串写进标签，泄漏内网库地址与账号 |
+
+> 通过 `AddStardust` 接入的应用必定带追踪中间件，排除后不会丢失入站埋点。需要采集时，可在调用 `AttachOpenTelemetry()` 之前自行给 `OpenTelemetry` 赋值，或从 `DefaultExcludeSources` 移除条目。
+
+**上报前脱敏**：`ProcessSpans` 在组装上报数据前调用 `SanitizeTags`，遮蔽 `connection_string` 整行以及 `password`/`pwd`/`secret`/`token`/`api_key` 等键值；`StarTracer.EnableTagSanitize` 默认开启，可关闭。
 
 ---
 
@@ -304,6 +321,7 @@ sequenceDiagram
 
 - **内存实时值优先**：告警通过 `ITraceStatService.GetLiveMinute/GetLiveAppMinute` 直接读取延迟队列中的内存实体，未命中时回落数据库。落盘周期（默认300秒）不再约束告警时效；
 - **错误率现场计算**：`ErrorRate` 列在保存校验时计算，内存实体需按`错误数/总次数`现场计算；
+- **传输层中断不计错**：客户端提前断开、WebSocket 对端未完成关闭握手等由 `ErrorSampleFilter` 统一识别，不计入错误率；异常采样压缩为“首行 + 首个业务堆栈帧”，避免长堆栈淹没监控样本与告警消息；
 - **回溯桶**：固定检查当前与上一个5分钟桶，兜底进程重启或数据晚到落库的场景；
 - **紧急落盘**：告警触发后调用 `TriggerFlush()` 立即提交分钟级队列，保证告警依据及时入库。
 

@@ -6,7 +6,7 @@ StarAgent 的非 .NET 原生实现集合，目标是以轻量二进制接入 Sta
 |------|------|----------|
 | Go | 参考实现，已通过 6 项一致性测试 | Linux x64/ARM、Windows、macOS、OpenWrt |
 | Rust | 已通过 6 项一致性测试 | Linux musl、Windows、macOS |
-| C++ | 已通过 6 项一致性测试与真实服务端登录/上线验证；Windows 本机构建验证 | Linux、Windows、macOS、OpenWrt |
+| C++ | 已通过 6 项一致性测试与真实服务端登录/上线验证；Windows 本机构建 + Linux ARM64 真机实测 | Linux、Windows、macOS、OpenWrt |
 
 > C 版暂缓：C++ 已覆盖 C 的目标平台，且内存安全与生态库更合适。仅在出现无 C++ 工具链的特定嵌入式目标时再评估。
 
@@ -14,7 +14,8 @@ StarAgent 的非 .NET 原生实现集合，目标是以轻量二进制接入 Sta
 
 - Go：`go test ./...`、`go build ./cmd/staragent`、`CGO_ENABLED=0` 交叉编译（linux/amd64、linux/arm64、linux/arm、windows/amd64、windows/arm64、darwin/amd64、darwin/arm64）
 - Rust：`cargo test`、`cargo build` 通过；Windows 本机二进制可运行
-- C++：Windows 本机 `cmake` 构建通过，`staragent_tests` 50/50 项检查通过
+- C++：Windows 本机 `cmake` 构建通过，`staragent_tests` 67/67 项检查通过
+- C++ Linux 真机：A2 与 A4-WiFi（均为 Ubuntu 26.04 aarch64）本机构建通过，登录/自动注册/心跳/常量指标上报正常，`--scenario all` 6/6 通过
 - 一致性测试：Go / Rust / C++ 三种实现均对假 StarServer 运行 `--scenario all`，各自 `6 passed, 0 failed`
 - 真实服务端：Go / Rust / C++ Agent 均在真实 Kestrel StarServer 上完成登录、自动注册、Code/Secret 持久化与在线状态验证
 - 公网 StarServer：三种实现均以 `once` 模式连接 `http://star.newlifex.com:6600`，完成登录与心跳
@@ -48,7 +49,8 @@ pwsh ./StarAgent.Native/packaging/build.ps1
 - 事件上报、命令回复、指数退避重连
 - CPU/内存/磁盘/网络/进程/运行时长等基础指标
 - `bash`/`cmd`/`node/synctime`/`node/setchannel`/`node/restart`
-- systemd / launchd / Windows Service / OpenWrt procd
+- 只提供前台进程（`run`/`once`/`version`），**不提供系统服务安装（install/uninstall/start/stop/status）**；systemd / procd / launchd / 计划任务由部署侧提供模板（见 `packaging/install/`）
+- 引导安装（`bootstrap`）：登录后按 OS/架构取包，安装 .NET 运行时与完整版 StarAgent，供需要完整能力的节点升格（C++/Go/Rust 均已实现）
 - 移动端由 .NET 移动代理覆盖（`StarAgent.Mobile` / `StarAgent.Android` / `StarAgent.iOS`，不在本目录）；`ProductCode=StarAgent-Mobile`，产物在 `Bin/Agent/mobile/`，构建与冒烟见各项目下的 `pack-android.ps1`、`run-android.ps1`、`run-ios.sh`
 
 ### 系统与硬件信息
@@ -61,7 +63,7 @@ pwsh ./StarAgent.Native/packaging/build.ps1
 
 原生 Agent 的 `Runtime` / `Framework` 上报自身语言运行时（Go/Rust/C++），不枚举本机 .NET Framework 集合。
 
-首版**不包含**：进程守护、远程发布（`deploy/*`）、自身升级、Web 管理面板、插件、防火墙、DNS、截屏。
+首版**不包含**：系统服务安装卸载与启停、进程守护、远程发布（`deploy/*`）、自身升级、Web 管理面板、插件、防火墙、DNS、截屏。
 
 ## 安全默认
 

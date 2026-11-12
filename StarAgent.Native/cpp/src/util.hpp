@@ -49,5 +49,18 @@ std::int64_t UnixMsNow();
 std::int64_t UnixSecondsNow();
 std::int64_t SteadyMsNow();
 std::string ToHex(const unsigned char* data, std::size_t size);
+// 计算 MD5（16 字节小写十六进制），用于校验升级包
+std::string Md5Hex(const std::string& data);
+std::string Md5File(const std::string& path);
+
+// 网络质量评分：延迟指数衰减（1ms 满分，10ms 99.1%，100ms 90.6%），再乘成功率。
+// latency_ms 为平均延迟，success 为成功次数，count 为总探测次数。
+double ComputePingScore(int latency_ms, int success, int count);
+
+// 按指定小数位四舍五入（factor 由 digits 推导），用于避免 27.850000000000023 这类浮点尾数
+double RoundTo(double value, int digits);
+// 百分比（0~100）转比例（0~1），用于心跳中的 percent 字段。
+// 服务端这些字段按比例存储、展示时再乘 100，与 .NET 客户端 MachineInfo 口径一致。
+double PercentToRatio(double percent);
 
 } // namespace staragent

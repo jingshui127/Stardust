@@ -75,7 +75,6 @@
 "Downloading {0}": "Baixando {0}"
 "Download: {0}": "Transferência: {0}"
 "Download [{0}]: {1} {2}": "Transferência [{0}]: {1} {2}"
-"Download failed, verification error: {0} (local) != {1} (remote)": "Falha no download, erro de verificação: {0} (local) != {1} (remoto)"
 "Download completed; ready to overwrite: {0}": "Download concluído; pronto para sobrescrever: {0}"
 "Download file {0}, success: {1}": "Baixar arquivo {0}, sucesso: {1}"
 "Download file {0}, source: {1}": "Baixar arquivo {0}, origem: {1}"
@@ -221,4 +220,4 @@
 "Succeeded": "Concluído"
 "File [{0}] changed; stopping the application and starting it {1}ms later": "O arquivo [{0}] foi alterado; a aplicação será parada e iniciada {1}ms depois"
 "Stardust distributed core": "Núcleo distribuído Stardust"
-"Stardust distributed service framework core library. Provides client SDKs for configuration center, registry, service discovery, distributed tracing, APM, and log center, supporting configuration pulling, service registration and discovery, call tracing, performance and log reporting.": "Biblioteca principal do framework de serviços distribuídos Stardust. Fornece SDKs de cliente para centro de configuração, registro, descoberta de serviços, rastreamento distribuído, APM e central de logs, com suporte a obtenção de configuração, registro e descoberta de serviços, rastreamento de chamadas e envio de desempenho e logs."
+"Stardust distributed core client library. One-line integration for configuration delivery, service registration and discovery, distributed tracing, APM and log reporting.": "Biblioteca cliente central do Stardust. Integração em uma linha para entrega de configuração, registro e descoberta de serviços, rastreamento, APM e envio de logs."

@@ -68,6 +68,19 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
     //    return rs;
     //}
 
+    /// <summary>应用登录。平台设置的默认语言优先于核心配置</summary>
+    /// <param name="context">设备上下文</param>
+    /// <param name="request">登录请求</param>
+    /// <param name="source">来源</param>
+    /// <returns>登录响应</returns>
+    public override ILoginResponse Login(DeviceContext context, ILoginRequest request, String source)
+    {
+        var rs = base.Login(context, request, source);
+        if (rs is LoginResponse response) response.DefaultLanguage = _setting.GetDefaultLanguage(response.DefaultLanguage);
+
+        return rs;
+    }
+
     /// <summary>验证设备合法性</summary>
     public override Boolean Authorize(DeviceContext context, ILoginRequest request)
     {
@@ -86,10 +99,10 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         // 检查应用有效性
         if (!app.Enable) throw new ApiException(ApiCode.Forbidden, L.T("Application [{0}] is disabled.", app.Name));
 
-        // 安全治理：禁止空密钥应用匿名登录（认证绕过）。空密钥应用需在注册中心设置密钥，或临时开启"允许重新注册"自动收敛
+        // 安全治理：禁止空密钥应用匿名登录（认证绕过）。空密钥应用需在注册中心设置密钥，或临时开启"临时放行"自动收敛
         if (app.Secret.IsNullOrEmpty())
         {
-            app.WriteHistory(L.T("Application authentication"), false, L.T("An application with an empty secret cannot log in. Set a Secret for this application in the registry or enable re-registration."), null, ip, context.ClientId);
+            app.WriteHistory(HistoryAction.ApplicationAuthentication, false, L.TLog("An application with an empty secret cannot log in. Set a Secret for this application in the registry or enable re-registration."), null, ip, context.ClientId);
             return false;
         }
         if (app.Secret.EqualIgnoreCase(request.Secret)) return true;
@@ -101,7 +114,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         }
         if (request.Secret.IsNullOrEmpty() || !_passwordProvider.Verify(app.Secret, request.Secret))
         {
-            app.WriteHistory(L.T("Application authentication"), false, L.T("Secret validation failed."), null, ip, context.ClientId);
+            app.WriteHistory(HistoryAction.ApplicationAuthentication, false, L.TLog("Secret validation failed."), null, ip, context.ClientId);
             return false;
         }
 
@@ -130,17 +143,17 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
             app = App.FindByName(name);
             if (app != null)
             {
-                // 按重注册模式放行：Off=拒绝；Auto=收敛窗口；Trusted=可信接入（同项目节点/近期指纹）；Open=开放
-                var mode = app.ReRegister;
+                // 按重注册模式放行：Default=跟随全局默认；Open=开放；Trusted=可信接入（同项目节点/近期指纹）；Temporary=临时放行；Off=拒绝
+                var mode = app.ReRegister.Resolve(_setting.ReRegister);
                 if (mode == ReRegisterModes.Off || (mode == ReRegisterModes.Trusted && !IsTrustedClient(app, request)))
                     throw new ApiException(ApiCode.Forbidden, L.T("Application [{0}] already exists; reusing the old identity for dynamic registration is forbidden. Check the secret or contact the administrator. To enable automatic instance onboarding, adjust the application's re-registration mode (convergence window/trusted access/open).", name));
 
                 var model = request as AppModel;
                 var uuid = (model != null && !model.UUID.IsNullOrEmpty()) ? model.UUID : null;
                 var remark = uuid == null
-                    ? L.T("[{0}] re-registered in [{1}] mode; secret issued", app.Name, app.ReRegister)
-                    : L.T("[{0}] re-registered in [{1}] mode; secret issued, UUID={2}", app.Name, app.ReRegister, uuid);
-                app.WriteHistory(L.T("Application re-registered"), true, remark, null, context.UserHost, context.ClientId);
+                    ? L.TLog("[{0}] re-registered in [{1}] mode; secret issued", app.Name, mode)
+                    : L.TLog("[{0}] re-registered in [{1}] mode; secret issued, UUID={2}", app.Name, mode, uuid);
+                app.WriteHistory(HistoryAction.ApplicationReRegistered, true, remark, null, context.UserHost, context.ClientId);
                 context.Device = app;
 
                 return app;
@@ -154,14 +167,14 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
                 Enable = _setting.AppAutoRegister,
             });
 
-            app.WriteHistory(L.T("Application registered"), true, L.T("[{0}] registered successfully.", app.Name), null, context.UserHost, context.ClientId);
+            app.WriteHistory(HistoryAction.ApplicationRegistered, true, L.TLog("[{0}] registered successfully.", app.Name), null, context.UserHost, context.ClientId);
             context.Device = app;
         }
         catch (Exception ex)
         {
             span?.SetError(ex, null);
 
-            app?.WriteHistory(L.T("Application registered"), false, L.T("[{0}] registration failed: {1}", app.Name, ex.Message), null, context.UserHost, context.ClientId);
+            app?.WriteHistory(HistoryAction.ApplicationRegistered, false, L.TLog("[{0}] registration failed: {1}", app.Name, ex.Message), null, context.UserHost, context.ClientId);
 
             throw;
         }
@@ -247,8 +260,9 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
         app.LastIP = ip;
         app.UpdateIP = ip;
 
-        // 密钥配对成功，仅收敛窗口模式（Auto）自动关闭重注册窗口，防止长期开启被冒用；可信接入/开放模式保持长期有效
-        if (app.ReRegister == ReRegisterModes.Auto && !app.Secret.IsNullOrEmpty()) app.ReRegister = ReRegisterModes.Off;
+        // 密钥配对成功，仅显式临时放行模式（Temporary）自动关闭重注册窗口，防止长期开启被冒用；可信接入/开放模式保持长期有效
+        // 跟随全局（Default）的应用不改写自身配置，窗口语义由全局默认统一控制
+        if (app.ReRegister == ReRegisterModes.Temporary && !app.Secret.IsNullOrEmpty()) app.ReRegister = ReRegisterModes.Off;
 
         app.Update();
 
@@ -269,11 +283,36 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
             if (!inf.UUID.IsNullOrEmpty()) online.Uuid = inf.UUID;
             if (!inf.Macs.IsNullOrEmpty()) online.Macs = inf.Macs;
 
-            online.Update();
+            try
+            {
+                online.Update();
+            }
+            catch (Exception ex) when (EntityErrorHelper.IsDuplicateKey(ex))
+            {
+                // 并发上线时 Client 唯一索引冲突：另一实例已占用该标识，转为更新已有记录
+                var online2 = AppOnline.FindBySessionId(online.Client, false);
+                if (online2 == null || online2.Id == online.Id) throw;
+
+                online2.AppId = online.AppId;
+                online2.Name = online.Name;
+                online2.Category = online.Category;
+                online2.NodeId = online.NodeId;
+                online2.Version = online.Version;
+                online2.Compile = online.Compile;
+                online2.Uuid = online.Uuid;
+                online2.Macs = online.Macs;
+                online2.IP = online.IP;
+                online2.Token = online.Token;
+                online2.TraceId = online.TraceId;
+                online2.UpdateIP = online.UpdateIP;
+                online2.Update();
+
+                context.Online = online2;
+            }
         }
 
         // 登录历史
-        WriteHistory(context, L.T("Application authentication"), true, L.T("[{0}/{1}] authenticated {2}", app.DisplayName, app.Name, model.ToJson(false, false, false)));
+        WriteHistory(context, HistoryAction.ApplicationAuthentication, true, L.TLog("[{0}/{1}] authenticated {2}", app.DisplayName, app.Name, model.ToJson(false, false, false)));
 
         // 检查应用上线恢复
         OnlineService.CheckOnline(app);
@@ -340,7 +379,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
             services.Add(svc);
 
             changed = true;
-            WriteHistory(app, "RegisterService", true, L.T("Registered service [{0}] {1}", model.ServiceName, model.ClientId), ip, clientId);
+            WriteHistory(app, HistoryAction.RegisterService, true, L.TLog("Registered service [{0}] {1}", model.ServiceName, model.ClientId), ip, clientId);
         }
         else
         {
@@ -506,7 +545,7 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
             services.Remove(svc);
 
             changed = true;
-            WriteHistory(app, "UnregisterService", true, L.T("Service [{0}] went offline: {1}", model.ServiceName, svc.Client), ip, svc.Client);
+            WriteHistory(app, HistoryAction.UnregisterService, true, L.TLog("Service [{0}] went offline: {1}", model.ServiceName, svc.Client), ip, svc.Client);
         }
 
         info.Providers = services.Count;
@@ -536,6 +575,19 @@ public class RegistryService : DefaultDeviceService<Node, NodeOnline>
     #endregion
 
     #region 心跳保活
+    /// <summary>应用心跳。平台设置的默认语言优先于核心配置</summary>
+    /// <param name="context">设备上下文</param>
+    /// <param name="request">心跳请求</param>
+    /// <param name="response">心跳响应</param>
+    /// <returns>心跳响应</returns>
+    public override IPingResponse Ping(DeviceContext context, IPingRequest? request, IPingResponse? response)
+    {
+        var rs = base.Ping(context, request, response);
+        if (rs is PingResponse ping) ping.DefaultLanguage = _setting.GetDefaultLanguage(ping.DefaultLanguage);
+
+        return rs;
+    }
+
     //public override IOnlineModel OnPing(DeviceContext context, IPingRequest request)
     //{
     //    if (context.Device is not App app) return null;

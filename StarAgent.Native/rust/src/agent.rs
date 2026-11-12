@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use chrono::{DateTime, Utc};
+use futures_util::future::BoxFuture;
 use tokio::sync::Mutex;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
@@ -116,6 +117,27 @@ impl Agent {
 
         let offset_ms = Arc::new(AtomicI64::new(0));
         let timeout = Duration::from_secs(config.command_timeout.clamp(1, 300) as u64);
+        // 引导安装默认关闭；开启后由 node/bootstrap 触发，仅依赖客户端与配置，无需回指 Agent
+        let bootstrap_action = if config.bootstrap {
+            let client = client.clone();
+            let store = store.clone();
+            Some(Arc::new(move || -> BoxFuture<'static, Result<()>> {
+                let client = client.clone();
+                let store = store.clone();
+                Box::pin(async move {
+                    let Some(plan) = client.bootstrap().await? else {
+                        return Err(anyhow!("server returned no agent package"));
+                    };
+                    let config = store.snapshot();
+                    let version =
+                        crate::bootstrap::run(&plan, &config.data_dir, &config.server).await?;
+                    info!(version, "bootstrap completed");
+                    Ok(())
+                })
+            }) as Arc<dyn Fn() -> BoxFuture<'static, Result<()>> + Send + Sync>)
+        } else {
+            None
+        };
         let executor = {
             let offset = offset_ms.clone();
             let store = store.clone();
@@ -132,6 +154,7 @@ impl Agent {
                         .map(|_| ())
                 }),
                 cancel: cancel.clone(),
+                bootstrap: bootstrap_action,
             })
         };
 
@@ -345,6 +368,29 @@ impl Agent {
                 _ => {}
             }
         }
+
+        Ok(())
+    }
+
+    /// 登录后取引导安装清单，安装 .NET 运行时与完整版 StarAgent。
+    pub async fn bootstrap(self: Arc<Self>) -> Result<()> {
+        self.login().await?;
+
+        let info = self.client.bootstrap().await?;
+        let Some(info) = info else {
+            anyhow::bail!("server returned no agent package");
+        };
+
+        let config = self.store.snapshot();
+        let version = crate::bootstrap::run(&info, &config.data_dir, &config.server).await?;
+
+        self.enqueue(
+            "info",
+            "Bootstrap",
+            &format!("installed StarAgent {version}"),
+        );
+        let shutdown = CancellationToken::new();
+        let _ = tokio::time::timeout(Duration::from_secs(10), self.flush_events(&shutdown)).await;
 
         Ok(())
     }

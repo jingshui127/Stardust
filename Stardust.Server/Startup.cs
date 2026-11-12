@@ -37,7 +37,8 @@ public class Startup
 
         var set = StarServerSetting.Current;
         //var star = new StarFactory(null, "StarServer", null);
-        var star = services.AddStardust();
+        // 自举场景：服务端在开始监听之前登录自己必然失败，延迟到主机启动完成后再连接
+        var star = services.AddStardust(null, null, null, delayStart: true);
         if (star.Server.IsNullOrEmpty()) star.Server = $"http://127.0.0.1:{set.Port}";
 
         // 埋点跟踪
@@ -101,6 +102,9 @@ public class Startup
         services.AddSingleton<AgentDeployService>();
         services.AddSingleton<GatewayService>();
         services.AddSingleton<DownloadTokenService>();
+        services.AddSingleton<InstallService>();
+        services.AddSingleton<HomeService>();
+        services.AddSingleton<BrowserTokenService>();
 
         services.AddSingleton<NodeSessionManager>();
         services.AddSingleton<AppSessionManager>();
@@ -126,13 +130,14 @@ public class Startup
         });
 
         // CORS。默认允许任意来源（兼容浏览器端直接接入）；配置 CorsOrigins 后仅允许白名单来源（安全V-15）
+        // 必须显式声明方法：跨域 JSON POST 会先发 OPTIONS 预检，缺少 Allow-Methods 时浏览器直接拦截（浏览器埋点直报依赖此项）
         services.AddCors(options => options.AddPolicy("star_cors", builder =>
         {
             var corsOrigins = set.CorsOrigins;
             if (corsOrigins.IsNullOrEmpty())
-                builder.AllowAnyOrigin().AllowAnyHeader();
+                builder.AllowAnyOrigin().AllowAnyHeader().WithMethods("GET", "POST");
             else
-                builder.WithOrigins(corsOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).AllowAnyHeader();
+                builder.WithOrigins(corsOrigins.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)).AllowAnyHeader().WithMethods("GET", "POST");
         }));
 
         // 后台服务。数据保留，定时删除过期数据
@@ -282,6 +287,9 @@ public class Startup
             }
         });
 
+        // 本机监听就绪后再登录自己，避免启动阶段的连接失败与超时日志
+        lifetime?.ApplicationStarted.Register(() => app.ApplicationServices.GetRequiredService<StarFactory>().Open());
+
         app.UseEndpoints(endpoints =>
         {
             endpoints.MapControllers();
@@ -358,13 +366,16 @@ public class Startup
 
         try
         {
+            // 已经配置了控制台地址就以配置为准，不再被注册中心的临时地址覆盖
+            var set = StarServerSetting.Current;
+            if (!set.WebUrl.IsNullOrEmpty()) return;
+
             var registry = serviceProvider.GetRequiredService<IRegistry>();
             if (registry == null) return;
 
             var addrs = await registry.ResolveAddressAsync("StarWeb");
-            var str = addrs.Join(";");
-            var set = StarServerSetting.Current;
-            if (set.WebUrl != str && !str.IsNullOrEmpty())
+            var str = PickWebUrl(set.WebUrl, addrs);
+            if (str != null)
             {
                 set.WebUrl = str;
                 set.Save();
@@ -374,5 +385,23 @@ public class Startup
         {
             XTrace.WriteException(ex);
         }
+    }
+
+    /// <summary>计算需要写入的控制台地址。仅在尚未配置时采用注册中心解析结果</summary>
+    /// <param name="current">当前已配置的控制台地址，多个地址以英文分号分隔</param>
+    /// <param name="addrs">注册中心解析出来的星尘管理平台地址</param>
+    /// <returns>需要保存的新地址；无需改动时返回 null</returns>
+    /// <remarks>
+    /// 已配置时一律不改写：注册中心解析结果会混入历史实例与临时地址，每次启动都不尽相同，
+    /// 覆盖配置既让人工配置失效，也会反复触发配置变更日志与配置文件重写。
+    /// </remarks>
+    public static String? PickWebUrl(String? current, String[]? addrs)
+    {
+        if (!current.IsNullOrEmpty()) return null;
+
+        var str = addrs?.Join(";");
+        if (str.IsNullOrEmpty()) return null;
+
+        return str;
     }
 }

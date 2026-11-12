@@ -55,6 +55,7 @@
         <Column Name="WhiteIPs" DataType="String" Description="IP白名单。符合条件的来源IP才允许访问，支持*通配符，多个逗号隔开" />
         <Column Name="BlackIPs" DataType="String" Description="IP黑名单。符合条件的来源IP禁止访问，支持*通配符，多个逗号隔开" />
         <Column Name="NewServer" DataType="String" Description="新服务器。该项目下的节点自动迁移到新的服务器地址" Category="参数设置" />
+        <Column Name="SyncTime" DataType="Int32" Description="同步时间。该项目下节点定期同步服务器时间到本地的秒数，默认0表示不校时" Category="参数设置" />
         <Column Name="CreateUserId" DataType="Int32" Description="创建者" Category="扩展" />
         <Column Name="CreateTime" DataType="DateTime" Description="创建时间" Category="扩展" />
         <Column Name="CreateIP" DataType="String" Description="创建地址" Category="扩展" />
@@ -96,6 +97,9 @@
         <Column Name="LastTime" DataType="DateTime" Description="最后调用时间" />
         <Column Name="LastIP" DataType="String" Description="最后调用地址" />
         <Column Name="CallCount" DataType="Int32" Description="调用次数" />
+        <Column Name="UserId" DataType="Int32" Description="绑定用户。Membership用户Id，令牌权限来源之一；0表示未绑定" Category="授权" />
+        <Column Name="ProjectId" DataType="Int32" Description="绑定项目。GalaxyProject.Id，严格单项目；0表示未绑定" Category="授权" />
+        <Column Name="Scopes" DataType="String" Length="500" Description="授权范围。逗号分隔的域:级别（apps:read,config:write），空表示零授权仅可自检" Category="授权" />
         <Column Name="TraceId" DataType="String" Description="链路追踪" Category="扩展" />
         <Column Name="CreateUserId" DataType="Int32" Description="创建者" Category="扩展" />
         <Column Name="CreateTime" DataType="DateTime" Description="创建时间" Category="扩展" />
@@ -125,7 +129,6 @@
       </Columns>
       <Indexes>
         <Index Columns="TokenId,ResourceType,ResourceId" Unique="True" />
-        <Index Columns="TokenId" />
         <Index Columns="ResourceType,ResourceId" />
       </Indexes>
     </Table>

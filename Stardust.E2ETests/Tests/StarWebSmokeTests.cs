@@ -71,15 +71,38 @@ public class StarWebSmokeTests : IAsyncLifetime
         _playwright?.Dispose();
     }
 
-    [Fact(DisplayName = "登录后进入管理后台")]
+    [Fact(DisplayName = "登录后进入看板或管理后台")]
     public async Task Login_EntersAdmin()
     {
-        Assert.Contains("/Admin", _page!.Url, StringComparison.OrdinalIgnoreCase);
+        // 登录落地已改为看板根路径；保留 /Admin 兼容后台直达场景
+        Assert.True(_page!.Url.EndsWith("/", StringComparison.Ordinal) || _page.Url.Contains("/Admin", StringComparison.OrdinalIgnoreCase),
+            $"登录后应进入看板或管理后台，实际：{_page.Url}");
 
         // 站点标题来自程序集标题（当前为英文源文，浏览器标题未走界面语言翻译），故中英文名均视为正确
         var title = await _page.TitleAsync();
         Assert.True(title.Contains("星尘", StringComparison.Ordinal) || title.Contains("Stardust", StringComparison.OrdinalIgnoreCase),
             $"管理后台标题应包含站点名称，实际：{title}");
+    }
+
+    [Fact(DisplayName = "配置页与列表页随查询串语言切换，平台设置只提供客户端默认语言")]
+    public async Task Language_SwitchesByQuery()
+    {
+        await _page!.GotoAsync("/Platform/StarServer?lang=en", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30_000 });
+        var enConfig = await _page.Locator("body").InnerTextAsync();
+        Assert.Contains("Service port", enConfig);
+        Assert.DoesNotContain("服务端口", enConfig);
+        // 界面语言统一由核心库基础配置提供；平台设置只暴露下发给客户端的默认语言
+        Assert.DoesNotContain("界面配置", enConfig);
+
+        await _page.GotoAsync("/Platform/StarServer?lang=zh-Hans", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30_000 });
+        var zhConfig = await _page.Locator("body").InnerTextAsync();
+        Assert.Contains("服务端口", zhConfig);
+        Assert.DoesNotContain("Service port", zhConfig);
+
+        await _page.GotoAsync("/Nodes/Node?lang=en", new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded, Timeout = 30_000 });
+        var enNode = await _page.Locator("body").InnerTextAsync();
+        Assert.Contains("Node management", enNode);
+        Assert.DoesNotContain("节点管理", enNode);
     }
 
     [Fact(DisplayName = "未登录访问业务页面被重定向到登录页")]
@@ -178,6 +201,11 @@ public class StarWebSmokeTests : IAsyncLifetime
 
         var marker = _errorMarkers.FirstOrDefault(e => body.Contains(e, StringComparison.OrdinalIgnoreCase));
         if (marker != null) reasons.Add($"响应含错误标记[{marker}]");
+
+        // 列表列头不得残留未解析的单元格模板（如 {Name}）：模板应写在 ListField.Text，列名由字段描述提供
+        var headers = await page.Locator("table thead th").AllInnerTextsAsync();
+        var templated = headers.Select(e => e.Trim()).Where(e => e.StartsWith('{') && e.EndsWith('}')).ToList();
+        if (templated.Count > 0) reasons.Add($"列头残留模板：{String.Join(" | ", templated.Take(3))}");
 
         var ok = reasons.Count == 0;
         var known = !ok && _knownIssues.TryGetValue(menu.Url, out var note);

@@ -1,25 +1,78 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using NewLife;
+using Stardust.Models;
+using Stardust.Server.Services;
 
 namespace Stardust.Server.Controllers;
 
-/// <summary>首页控制器。根路径重定向到代理安装页</summary>
+/// <summary>首页控制器。根路径即安装引导页，服务端地址与安装包在这里一次性给出</summary>
+/// <remarks>关闭安装引导页（EnableInstallPage=false）时保持旧行为：跳转到 StarWeb 的代理安装页</remarks>
 [AllowAnonymous]
 [ApiController]
 public class HomeController : ControllerBase
 {
     private readonly StarServerSetting _setting;
+    private readonly InstallService _installService;
+    private readonly HomeService _homeService;
 
     /// <summary>实例化</summary>
-    /// <param name="setting"></param>
-    public HomeController(StarServerSetting setting) => _setting = setting;
+    /// <param name="setting">服务端配置</param>
+    /// <param name="installService">安装引导服务</param>
+    /// <param name="homeService">首页概览服务</param>
+    public HomeController(StarServerSetting setting, InstallService installService, HomeService homeService)
+    {
+        _setting = setting;
+        _installService = installService;
+        _homeService = homeService;
+    }
 
-    /// <summary>首页跳转</summary>
-    /// <returns></returns>
+    /// <summary>首页。默认返回安装引导页，Accept 或 format 指定 json 时返回安装清单</summary>
+    /// <param name="format">返回格式。json 返回安装清单</param>
+    /// <returns>安装引导页或安装清单</returns>
     [Route("/")]
     [HttpGet]
-    public IActionResult Index()
+    public IActionResult Index(String? format)
+    {
+        if (!_setting.EnableInstallPage) return LegacyHome();
+
+        // 脚本与工具按清单消费；页面本身走 HTML
+        var accept = Request.Headers.Accept.ToString();
+        if (format.EqualIgnoreCase("json") || accept.Contains("application/json", StringComparison.OrdinalIgnoreCase))
+        {
+            var server = InstallService.GetServerUrl(Request, _setting);
+            return Ok(_installService.GetManifest(server));
+        }
+
+        var html = _installService.GetPage();
+        if (html.IsNullOrEmpty()) return LegacyHome();
+
+        return Content(html, "text/html; charset=utf-8", Encoding.UTF8);
+    }
+
+    /// <summary>平台概览。节点、应用与今日调用统计，供首页展示</summary>
+    /// <returns>概览数据</returns>
+    [HttpGet("/home/summary")]
+    public HomeSummary Summary()
+    {
+        var server = InstallService.GetServerUrl(Request, _setting);
+        return _homeService.GetSummary(server, FirstWebUrl());
+    }
+
+    /// <summary>取第一个可用的管理控制台地址</summary>
+    /// <returns>控制台地址，未配置时返回null</returns>
+    private String? FirstWebUrl()
+    {
+        var url = _setting.WebUrl;
+        if (url.IsNullOrEmpty()) return null;
+
+        return url.Split(';', ',').FirstOrDefault(e => !e.IsNullOrWhiteSpace())?.Trim().TrimEnd('/');
+    }
+
+    /// <summary>旧版首页行为：跳转到 StarWeb 的代理安装页</summary>
+    /// <returns>重定向或基本信息</returns>
+    private IActionResult LegacyHome()
     {
         // 如果配置了StarWeb地址，跳转到StarWeb的/agent页面
         var webUrl = _setting.WebUrl;
@@ -38,3 +91,4 @@ public class HomeController : ControllerBase
         });
     }
 }
+

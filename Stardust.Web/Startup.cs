@@ -22,8 +22,11 @@ using Stardust.Server;
 using Stardust.Services;
 using Stardust.Server.Services;
 using Stardust.Web.Services;
+using Stardust.Web.Filters;
 using XCode;
 using XCode.DataAccessLayer;
+using Stardust.Mcp;
+using XCode.Membership;
 
 namespace Stardust.Web;
 
@@ -64,8 +67,19 @@ public class Startup
         services.AddSingleton<DeployService>();
         services.AddSingleton<PipelineService>();
         services.AddSingleton<HotAppService>();
+        services.AddSingleton<TraceShareTokenService>();
+        services.AddSingleton<DashboardService>();
         services.AddSingleton<NewLife.Cube.Services.TokenService>();
-        services.AddSingleton<McpService>();
+        services.AddStardustMcp(o =>
+        {
+            // 运行时读取开关：EnableMcp 总开关、McpActionSet 域白名单（* 表示全部域）
+            o.Enabled = () => StarServerSetting.Current.EnableMcp;
+            o.Domains = () => StarServerSetting.Current.McpActionSet;
+            // 敏感配置 key 关键词（前端治理页平台设置可改）
+            o.SensitiveKeyKeywords = () => (StarServerSetting.Current.SensitiveKeywords ?? "")
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        });
+        services.AddSingleton<IMcpOperations, McpOperations>();
 
         // DDNS服务
         services.AddSingleton<IDnsProvider, AliyunDnsProvider>();
@@ -149,6 +163,7 @@ public class Startup
         //InitProject();
         ThreadPoolX.QueueUserWorkItem(InitProject);
         ThreadPoolX.QueueUserWorkItem(FixAppDeployNode);
+        ThreadPoolX.QueueUserWorkItem(RemoveDeadMenus);
 
         // 多语言。配置了固定语言时全进程生效，否则按请求语言识别
         app.UseStardustLocalization();
@@ -163,6 +178,9 @@ public class Startup
 
         app.UseStardust();
 
+        // 登录成功后默认进入看板中心。魔方登录由中间件处理并固定跳转 /Admin，这里在没有明确返回地址时改写到 /
+        app.UseLoginLanding();
+
         // 缓存运行时安装文件
         var set = StarServerSetting.Current;
         if (!set.FileCache.IsNullOrEmpty())
@@ -172,10 +190,13 @@ public class Startup
         if (Environment.GetEnvironmentVariable("__ASPNETCORE_BROWSER_TOOLS") is null)
             app.UseResponseCompression();
 
-        // MCP 协议端点中间件：在 Cube 之前短路 /mcp，避免 Web 中间件影响机器API
-        app.UseMiddleware<McpMiddleware>();
+        // MCP 协议端点：在 Cube 之前短路 /mcp，避免 Web 中间件影响机器 API
+        app.UseStardustMcp();
 
         app.UseCube(env);
+
+        // Cube 菜单扫描完成后才能定位父菜单，避免启动竞态导致看板入口丢失
+        ThreadPoolX.QueueUserWorkItem(EnsureDashboardMenu);
 
         // 注册退出事件
         if (app is IHost host)
@@ -215,8 +236,8 @@ public class Startup
             set2.Skin = "layui";
             set2.Save();
         }
-        // 兼容旧版本默认值，登录后落地到魔方工作台（展示星尘 KPI 指标卡）
-        if (set2.StartPage.EqualIgnoreCase("/Admin/User/Info", "/Platform/GalaxyProject"))
+        // 管理后台首页保留魔方原生工作台；看板中心通过站点根路径 / 与「看板中心」菜单进入
+        if (set2.StartPage.EqualIgnoreCase("/Admin/User/Info", "/Platform/GalaxyProject", "/Dashboard/System"))
         {
             set2.StartPage = "/Admin/Index/Dashboard";
             set2.Save();
@@ -355,6 +376,57 @@ public class Startup
         }
 
         entity.Update();
+    }
+
+    /// <summary>清理历史遗留的死菜单。接口控制器（如流水线 Webhook）没有管理页面，早期被区域扫描成了菜单，点开即 404</summary>
+    private static void RemoveDeadMenus()
+    {
+        var menu = Menu.Find(Menu._.Url == "/Deployment/PipelineWebhook");
+        if (menu != null)
+        {
+            XTrace.WriteLine("Remove dead menu [{0}]", menu.Url);
+            menu.Delete();
+        }
+    }
+
+    /// <summary>确保「看板中心」菜单存在。看板控制器位于主程序集而非区域，魔方菜单扫描不会自动生成</summary>
+    /// <remarks>魔方后台左侧一级菜单只能作为分组展开，因此看板入口挂到「系统管理」下作为子菜单；页面会自动跳出内容框架。</remarks>
+    private static void EnsureDashboardMenu()
+    {
+        // 优先挂到「平台管理」，保证进入后台第一屏就能看到看板入口。
+        // Cube 菜单扫描可能仍在后台执行，这里最多等待 10 秒。
+        Menu parent = null;
+        for (var i = 0; i < 20 && parent == null; i++)
+        {
+            parent = Menu.Find(Menu._.Url == "/Platform") ?? Menu.Find(Menu._.Url == "/Admin");
+            if (parent == null) Thread.Sleep(500);
+        }
+        if (parent == null) return;
+
+        var menu = Menu.Find(Menu._.Url == "/Dashboard" & Menu._.ParentID == parent.ID);
+        // 清理早期放在一级的看板菜单，一级节点无法直接打开页面
+        foreach (var item in Menu.FindAll(Menu._.Url == "/Dashboard" & Menu._.ParentID != parent.ID))
+        {
+            XTrace.WriteLine("Remove dead dashboard menu [{0}]", item.ID);
+            item.Delete();
+        }
+
+        if (menu != null) return;
+
+        menu = new Menu
+        {
+            // 系统管理下已有「Dashboard」工作台菜单，这里用独立名称避免唯一键冲突
+            Name = "DashboardPortal",
+            DisplayName = "看板中心",
+            FullName = "Stardust.Web.Controllers.DashboardController",
+            Url = "/Dashboard",
+            ParentID = parent.ID,
+            Sort = -1,
+            Icon = "fa-th-large",
+            Visible = true,
+        };
+        menu.Insert();
+        XTrace.WriteLine("Add dashboard menu [{0}]", menu.Url);
     }
 
     private static void FixAppDeployNode()

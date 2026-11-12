@@ -1,0 +1,116 @@
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using NewLife.Log;
+using Stardust.Data.Monitors;
+using Stardust.Server;
+using Stardust.Server.Services;
+using Xunit;
+
+namespace ServerTest.Services;
+
+/// <summary>数据保留服务测试。覆盖保留期开关与多级保留期编排（SVR-3）</summary>
+public class DataRetentionServiceTests
+{
+    /// <summary>直接调用私有的清理方法，避免等待定时器</summary>
+    private static void RunWork(DataRetentionService service)
+    {
+        var mi = typeof(DataRetentionService).GetMethod("DoWork", BindingFlags.NonPublic | BindingFlags.Instance);
+        mi.Invoke(service, [null]);
+    }
+
+    private static AppMinuteStat CreateMinuteStat(DateTime statTime) => new()
+    {
+        AppId = 992801,
+        StatTime = statTime,
+        Total = 1,
+        Errors = 0,
+        Cost = 1,
+    };
+
+    [Fact(DisplayName = "保留期为零时跳过清理，过期数据保留")]
+    public void DoWork_Disabled_KeepsData()
+    {
+        var service = new DataRetentionService(new StarServerSetting { DataRetention = 0 }, null);
+
+        var entity = CreateMinuteStat(DateTime.Now.AddDays(-30));
+        entity.Insert();
+        try
+        {
+            RunWork(service);
+
+            Assert.NotNull(AppMinuteStat.FindByID(entity.ID));
+        }
+        finally
+        {
+            entity.Delete();
+        }
+    }
+
+    [Fact(DisplayName = "启用保留期后按分钟统计保留期清理过期数据，保留期内数据不动")]
+    public void DoWork_Enabled_RemovesExpiredKeepsFresh()
+    {
+        // 三级保留期分别为 1/2/3 天，分钟统计使用第一级
+        var service = new DataRetentionService(new StarServerSetting { DataRetention = 1, DataRetention2 = 2, DataRetention3 = 3 }, null);
+
+        var old = CreateMinuteStat(DateTime.Now.AddDays(-10));
+        old.Insert();
+        var fresh = CreateMinuteStat(DateTime.Now);
+        fresh.Insert();
+        try
+        {
+            RunWork(service);
+
+            // 过期数据被清理，保留期内数据不受影响（单表失败不影响其它表）
+            Assert.Null(AppMinuteStat.FindByID(old.ID));
+            Assert.NotNull(AppMinuteStat.FindByID(fresh.ID));
+        }
+        finally
+        {
+            AppMinuteStat.FindByID(old.ID)?.Delete();
+            AppMinuteStat.FindByID(fresh.ID)?.Delete();
+        }
+    }
+
+    [Fact(DisplayName = "只有真正删掉数据的表才写日志，其余表不刷屏")]
+    public void DoWork_LogsOnlyDeletedTables()
+    {
+        var log = new CaptureLog();
+        var old = XTrace.Log;
+        XTrace.Log = log;
+
+        // 造一条超过分钟统计保留期的记录，让 AppMinuteStat 真产生删除
+        var expired = CreateMinuteStat(DateTime.Now.AddDays(-10));
+        expired.Insert();
+        try
+        {
+            var service = new DataRetentionService(new StarServerSetting { DataRetention = 1, DataRetention2 = 2, DataRetention3 = 3 }, null);
+            RunWork(service);
+        }
+        finally
+        {
+            XTrace.Log = old;
+            AppMinuteStat.FindByID(expired.ID)?.Delete();
+        }
+
+        // 词表按表名逐条提供译文，格式串里必须带表名；用 {2} 之类通用模板会在运行时命中不到译文而退回英文
+        Assert.Contains(log.Messages, e => e.StartsWith("Deleted ") && e.Contains("AppMinuteStat records before"));
+
+        // 没有删除数据的表不再写“共 0”日志，否则每 10 分钟刷十几行空日志
+        // 注：测试库可能缺部分表，那会走 Failed to clean 分支，这里只校验成功日志
+        Assert.DoesNotContain(log.Messages, e => e.StartsWith("Deleted ") && e.Contains("NodeData records before"));
+        Assert.DoesNotContain(log.Messages, e => e.StartsWith("Deleted ") && e.Contains("AlarmHistory records before"));
+    }
+
+    /// <summary>捕获日志的简易实现，用于核对清理日志的格式串</summary>
+    private sealed class CaptureLog : Logger
+    {
+        /// <summary>已写入的消息集合</summary>
+        public List<String> Messages { get; } = [];
+
+        protected override void OnWrite(LogLevel level, String format, params Object?[] args)
+        {
+            lock (Messages) Messages.Add(args == null || args.Length == 0 ? format : String.Format(format, args));
+        }
+    }
+}

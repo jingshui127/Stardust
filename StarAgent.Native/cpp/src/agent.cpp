@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 #include "agent.hpp"
 
+#include "bootstrap.hpp"
 #include "util.hpp"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <filesystem>
 #include <stdexcept>
@@ -14,6 +16,8 @@ namespace {
 
 constexpr int kMaxEventBatch = 100;
 constexpr std::int64_t kUpgradePeriodMs = 6LL * 60 * 60 * 1000;
+// 升级失败后的重试间隔
+constexpr std::int64_t kUpgradeRetryMs = 10LL * 60 * 1000;
 
 struct LoginRejected : std::runtime_error
 {
@@ -37,6 +41,30 @@ std::string OsTag()
 #endif
 }
 
+std::string FileNameFromUrl(const std::string& url)
+{
+    auto path = url;
+    const auto query = path.find('?');
+    if (query != std::string::npos) path.resize(query);
+    const auto slash = path.find_last_of('/');
+    if (slash != std::string::npos) path = path.substr(slash + 1);
+    if (path.empty()) path = "staragent.update";
+    // 只保留安全字符，避免路径穿越
+    for (auto& ch : path)
+    {
+        const auto valid = (ch >= '0' && ch <= '9') || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                           ch == '.' || ch == '-' || ch == '_';
+        if (!valid) ch = '_';
+    }
+    return path;
+}
+
+std::string BaseName(const std::string& path)
+{
+    const auto slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? path : path.substr(slash + 1);
+}
+
 } // namespace
 
 Agent::Agent(AgentOptions options)
@@ -49,7 +77,8 @@ Agent::Agent(AgentOptions options)
       client_(options_.Configuration.Server, options_.Configuration.TlsVerify, logger_),
       metrics_(options_.Configuration.DataDir),
       events_((std::filesystem::path(options_.Configuration.DataDir) / "events.json").string(), 1000),
-      ws_client_(logger_)
+      ws_client_(logger_),
+      local_api_(logger_)
 {
     restart_arguments_ = options_.Arguments;
     period_seconds_ = std::max(1, options_.Configuration.MetricsInterval);
@@ -75,6 +104,19 @@ Agent::Agent(AgentOptions options)
         if (started) RequestStop();
         return started;
     };
+    executor_options.Reboot = []() { return platform::PowerAction(true); };
+    executor_options.Shutdown = []() { return platform::PowerAction(false); };
+    executor_options.Upgrade = [this]() {
+        {
+            std::lock_guard<std::mutex> lock(upgrade_mutex_);
+            last_upgrade_ms_ = 0;
+        }
+        CheckUpgrade();
+        return true;
+    };
+    // 与 AllowExec 同级的安全策略：未显式开启时执行器回复“引导安装未启用”
+    if (options_.Configuration.Bootstrap)
+        executor_options.Bootstrap = [this]() { return InstallBootstrap(); };
     executor_options.Log = &logger_;
     executor_ = std::make_unique<Executor>(std::move(executor_options));
 
@@ -107,6 +149,16 @@ int Agent::Run()
     Log().Info("staragent starting version=" + version_ + " server=" + client_.BaseUrl() +
                " allow_exec=" + (store_.Snapshot().AllowExec ? "true" : "false"));
     Enqueue("info", "Startup", "agent started version=" + version_);
+
+    // 本地 UDP 接口：局域网发现与本地 RPC（与 .NET StarAgent 的 5500 协议一致）
+    try
+    {
+        local_api_.Start(store_.Snapshot().LocalPort, [this]() { return BuildLocalInfo(); });
+    }
+    catch (const std::exception& ex)
+    {
+        Log().Warn(std::string("local api start failed: ") + ex.what());
+    }
 
     Backoff backoff;
     bool failed = false;
@@ -146,7 +198,47 @@ int Agent::Run()
     }
 
     Shutdown();
+    local_api_.Stop();
     return failed ? 1 : 0;
+}
+
+std::string Agent::InstallBootstrap()
+{
+    const auto plan = client_.Bootstrap();
+    if (!plan) return "server returned no agent package";
+
+    Log().Info("bootstrap plan agent=" + plan->Version + " runtime=" +
+               (plan->Runtime.Empty() ? std::string("none") : plan->Runtime.Version));
+
+    Bootstrapper bootstrapper(client_, logger_, options_.Configuration);
+    return bootstrapper.Run(*plan, stopping_);
+}
+
+int Agent::Bootstrap()
+{
+    try
+    {
+        Login();
+
+        const auto error = InstallBootstrap();
+        if (!error.empty())
+        {
+            Log().Error("bootstrap failed: " + error);
+            Enqueue("error", "Bootstrap", error);
+            FlushEvents();
+            return 1;
+        }
+
+        Log().Info("bootstrap completed");
+        Enqueue("info", "Bootstrap", "installed StarAgent");
+        FlushEvents();
+        return 0;
+    }
+    catch (const std::exception& ex)
+    {
+        Log().Error(std::string("bootstrap failed: ") + ex.what());
+        return 1;
+    }
 }
 
 int Agent::Once()
@@ -185,11 +277,13 @@ Agent::SessionResult Agent::RunSession(Backoff& backoff)
 
     std::atomic<bool> session_stopping{false};
     std::thread notify_thread([this, &session_stopping]() { NotifyLoop(session_stopping); });
+    std::thread quality_thread([this, &session_stopping]() { QualityLoop(session_stopping); });
 
     auto stop_notify = [&]() {
         session_stopping = true;
         ws_client_.Stop();
         if (notify_thread.joinable()) notify_thread.join();
+        if (quality_thread.joinable()) quality_thread.join();
     };
 
     struct NotifyGuard
@@ -298,10 +392,100 @@ void Agent::NotifyLoop(std::atomic<bool>& session_stopping)
     }
 }
 
+void Agent::QualityLoop(std::atomic<bool>& session_stopping)
+{
+    // 与 .NET StarClient 一致：约 48 秒刷新一次；探测放后台，避免拖慢心跳
+    const auto cancelled = [&]() { return stopping_.load() || session_stopping.load(); };
+    while (!cancelled())
+    {
+        RefreshQuality(cancelled);
+
+        const auto deadline = SteadyMsNow() + 48LL * 1000;
+        while (!cancelled() && SteadyMsNow() < deadline)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+}
+
+void Agent::RefreshQuality(const std::function<bool()>& cancelled)
+{
+    constexpr int kTimeoutMs = 2000;
+    constexpr int kCount = 5;
+
+    const auto network = NetworkSnapshot(false);
+
+    auto gateway = network.Gateway;
+    const auto slash = gateway.find('/');
+    if (slash != std::string::npos) gateway = gateway.substr(0, slash);
+
+    auto dns = network.Dns;
+    const auto comma = dns.find(',');
+    if (comma != std::string::npos) dns = dns.substr(0, comma);
+    dns = Trim(dns);
+    // 本地回环 DNS 无意义，改用公共 DNS 评估外网质量
+    if (dns.empty() || StartsWith(dns, "127.")) dns = "223.5.5.5";
+
+    auto server = client_.BaseUrl();
+    const auto scheme = server.find("://");
+    if (scheme != std::string::npos) server = server.substr(scheme + 3);
+    const auto path = server.find('/');
+    if (path != std::string::npos) server = server.substr(0, path);
+    if (StartsWith(server, "["))
+    {
+        const auto bracket = server.find(']');
+        if (bracket != std::string::npos) server = server.substr(1, bracket - 1);
+    }
+    else
+    {
+        const auto colon = server.find(':');
+        if (colon != std::string::npos) server = server.substr(0, colon);
+    }
+
+    QualityState state;
+    try
+    {
+        state.Gateway = platform::PingProbe(gateway, kTimeoutMs, kCount);
+    }
+    catch (...)
+    {
+    }
+    // 停机时不再探测剩余目标，避免拖延退出
+    if (cancelled()) return;
+    try
+    {
+        state.Dns = platform::PingProbe(dns, kTimeoutMs, kCount);
+    }
+    catch (...)
+    {
+    }
+    if (cancelled()) return;
+    try
+    {
+        state.Server = platform::PingProbe(server, kTimeoutMs, kCount);
+    }
+    catch (...)
+    {
+    }
+    state.AtMs = SteadyMsNow();
+
+    {
+        std::lock_guard<std::mutex> lock(quality_mutex_);
+        quality_ = state;
+    }
+
+    if (state.Gateway.Valid || state.Dns.Valid || state.Server.Valid)
+    {
+        Log().Debug("network quality gateway=" + std::to_string(state.Gateway.Latency) + "ms/" +
+                    std::to_string(state.Gateway.Score) + " dns=" + std::to_string(state.Dns.Latency) + "ms/" +
+                    std::to_string(state.Dns.Score) + " server=" + std::to_string(state.Server.Latency) + "ms/" +
+                    std::to_string(state.Server.Score));
+    }
+}
+
 void Agent::Shutdown()
 {
     if (shutdown_done_.exchange(true)) return;
-
     if (executor_) executor_->Stop();
     {
         std::lock_guard<std::mutex> lock(command_threads_mutex_);
@@ -516,11 +700,27 @@ void Agent::CheckUpgrade()
         const auto channel = store_.Snapshot().Channel;
         const auto info = client_.Upgrade(channel);
         if (!info || info->Version == version_) return;
+        // 已经成功应用过的版本不再重复下载替换，否则本地版本号未同步时会无限重启
+        const auto applied = store_.Snapshot().UpgradeVersion;
+        if (!applied.empty() && info->Version == applied) return;
 
         std::string remark = "available version " + info->Version;
         if (!info->Source.empty()) remark += " source=" + info->Source;
-        Log().Info("upgrade available, manual update required version=" + info->Version);
-        Enqueue("info", "Upgrade", remark);
+
+        if (!store_.Snapshot().AutoUpgrade)
+        {
+            Log().Info("upgrade available, auto upgrade disabled version=" + info->Version);
+            Enqueue("info", "Upgrade", remark + " (AutoUpgrade=false)");
+            return;
+        }
+
+        Log().Info("upgrade available, downloading version=" + info->Version + " source=" + info->Source);
+        if (!TryUpgrade(*info))
+        {
+            // 升级失败后等待退避周期再试，避免心跳频率拉满重试
+            std::lock_guard<std::mutex> retry_lock(upgrade_mutex_);
+            last_upgrade_ms_ = SteadyMsNow() - kUpgradePeriodMs + kUpgradeRetryMs;
+        }
     }
     catch (const std::exception& ex)
     {
@@ -536,6 +736,108 @@ void Agent::Enqueue(const std::string& type, const std::string& name, const std:
     event.Name = name;
     event.Remark = remark;
     events_.Add(event);
+}
+
+std::string Agent::BuildLocalInfo()
+{
+    const auto config = store_.Snapshot();
+
+    Json info = Json::object();
+    info["ProcessId"] = platform::ProcessId();
+    info["ProcessName"] = BaseName(platform::ExecutablePath());
+    info["Version"] = version_;
+    info["FileName"] = platform::ExecutablePath();
+    info["Arguments"] = Join(restart_arguments_, " ");
+    info["IP"] = LocalIP();
+    info["Server"] = client_.BaseUrl();
+    info["Code"] = config.Code;
+    info["Services"] = Json::array();
+    return info.dump();
+}
+
+bool Agent::TryUpgrade(const UpgradeInfo& info)
+{
+    if (info.Source.empty())
+    {
+        Log().Warn("upgrade skipped: empty source version=" + info.Version);
+        return false;
+    }
+
+    const auto lower = ToLower(info.Source);
+    if (EndsWith(lower, ".zip"))
+    {
+        Log().Warn("upgrade package is zip, native agent replaces a single binary only: " + info.Source);
+        Enqueue("warn", "Upgrade", "需人工升级：不支持的 zip 包 " + info.Version);
+        return false;
+    }
+
+    const auto directory = std::filesystem::path(store_.Snapshot().DataDir) / "Update";
+    std::error_code error;
+    std::filesystem::create_directories(directory, error);
+    const auto file = (directory / FileNameFromUrl(info.Source)).string();
+
+    std::string reason;
+    if (!client_.Download(info.Source, file, reason))
+    {
+        Log().Warn("upgrade download failed: " + reason);
+        Enqueue("warn", "Upgrade", "升级下载失败: " + reason);
+        return false;
+    }
+
+    if (!info.FileHash.empty())
+    {
+        const auto hash = Md5File(file);
+        if (!EqualsIgnoreCase(hash, info.FileHash))
+        {
+            Log().Warn("upgrade package hash mismatch local=" + hash + " remote=" + info.FileHash);
+            Enqueue("warn", "Upgrade", "升级包校验失败");
+            std::filesystem::remove(file, error);
+            return false;
+        }
+    }
+
+    const auto exe = platform::ExecutablePath();
+    const auto backup = exe + ".old";
+    std::filesystem::remove(backup, error);
+    std::filesystem::rename(exe, backup, error);
+    if (error)
+    {
+        Log().Warn("upgrade rename current binary failed: " + error.message());
+        Enqueue("warn", "Upgrade", "升级替换失败: " + error.message());
+        return false;
+    }
+
+    std::filesystem::copy_file(file, exe, std::filesystem::copy_options::overwrite_existing, error);
+    if (error)
+    {
+        std::error_code restore;
+        std::filesystem::rename(backup, exe, restore);
+        Log().Warn("upgrade copy new binary failed: " + error.message());
+        Enqueue("warn", "Upgrade", "升级替换失败: " + error.message());
+        return false;
+    }
+#ifndef _WIN32
+    std::filesystem::permissions(exe,
+                                 std::filesystem::perms::owner_exec | std::filesystem::perms::group_exec |
+                                     std::filesystem::perms::others_exec,
+                                 std::filesystem::perm_options::add, error);
+#endif
+
+    Log().Info("upgrade applied version=" + info.Version + " restarting");
+    Enqueue("info", "Upgrade", "已升级到 " + info.Version + "，准备重启");
+    // 先落盘再重启，新进程据此跳过同一版本，避免服务端仍推送时反复替换
+    try
+    {
+        const auto version = info.Version;
+        store_.Update([&version](Config& config) { config.UpgradeVersion = version; });
+    }
+    catch (const std::exception& ex)
+    {
+        Log().Warn(std::string("upgrade record version failed: ") + ex.what());
+    }
+    const bool started = platform::RestartSelf(restart_arguments_);
+    if (started) RequestStop();
+    return started;
 }
 
 NodeInfo Agent::BuildNodeInfo()
@@ -576,6 +878,7 @@ NodeInfo Agent::BuildNodeInfo()
     node.Board = hardware_.Board;
     node.DiskID = hardware_.DiskID;
     node.Macs = hardware_.Macs;
+    node.MaxOpenFiles = platform::MaxOpenFiles();
     node.InstallPath = platform::ExecutableDir();
     node.Runtime = "cpp17";
     node.Framework = "cpp17";
@@ -606,13 +909,50 @@ PingInfo Agent::BuildPingInfo()
     ping.FreeMemory = metrics.FreeMemory;
     ping.TotalSize = metrics.TotalSize;
     ping.AvailableFreeSpace = metrics.AvailableFreeSpace;
-    ping.CpuRate = metrics.CpuRate;
+    // CPU率、磁盘活动与电量在服务端都是 percent 字段（存 0~1、展示乘 100），必须转成比例再上报
+    ping.CpuRate = PercentToRatio(metrics.CpuRate);
     ping.UplinkSpeed = metrics.UplinkSpeed;
     ping.DownlinkSpeed = metrics.DownlinkSpeed;
+    ping.TcpConnections = metrics.TcpConnections;
+    ping.TcpTimeWait = metrics.TcpTimeWait;
+    ping.TcpCloseWait = metrics.TcpCloseWait;
+    ping.Temperature = RoundTo(metrics.Temperature, 1);
+    ping.Battery = PercentToRatio(metrics.Battery);
+    ping.Signal = metrics.Signal;
+    ping.DiskIOPS = metrics.DiskIops;
+    ping.DiskActiveTime = PercentToRatio(metrics.DiskActivePercent);
     ping.Uptime = metrics.Uptime;
     ping.Delay = delay;
     ping.SystemLoad = metrics.SystemLoad;
-    ping.ServerLatency = static_cast<std::uint64_t>(delay);
+
+    // 网络质量取后台探测缓存；未探测到时服务端延迟回退到本次 HTTP 往返
+    QualityState quality;
+    {
+        std::lock_guard<std::mutex> lock(quality_mutex_);
+        quality = quality_;
+    }
+    if (quality.Gateway.Valid)
+    {
+        ping.GatewayLatency = static_cast<std::uint64_t>(std::max(0, quality.Gateway.Latency));
+        ping.GatewayLossRate = quality.Gateway.LossRate;
+        ping.IntranetScore = quality.Gateway.Score;
+    }
+    if (quality.Dns.Valid)
+    {
+        ping.DnsLatency = static_cast<std::uint64_t>(std::max(0, quality.Dns.Latency));
+        ping.DnsLossRate = quality.Dns.LossRate;
+    }
+    if (quality.Server.Valid)
+    {
+        ping.ServerLatency = static_cast<std::uint64_t>(std::max(0, quality.Server.Latency));
+        ping.ServerLossRate = quality.Server.LossRate;
+    }
+    else
+    {
+        ping.ServerLatency = static_cast<std::uint64_t>(delay);
+    }
+    ping.InternetScore = quality.Dns.Score * 0.3 + quality.Server.Score * 0.7;
+
     return ping;
 }
 
@@ -649,7 +989,8 @@ std::vector<std::string> Agent::Plugins() const
 {
     return {"agent:cpp",
             std::string("cap:exec:") + (store_.Snapshot().AllowExec ? "true" : "false"),
-            "cap:upgrade=false",
+            std::string("cap:upgrade:") + (store_.Snapshot().AutoUpgrade ? "true" : "false"),
+            "cap:bootstrap=true",
             "cap:deploy=false",
             "os:" + OsTag()};
 }

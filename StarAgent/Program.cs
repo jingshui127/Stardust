@@ -1,9 +1,14 @@
 ﻿using System.Diagnostics;
 using System.Net;
 using System.Reflection;
+using System.Runtime.InteropServices;
+using System.Text;
 using NewLife;
 using NewLife.Agent;
+using NewLife.Agent.Command;
 using NewLife.Agent.Models;
+using NewLife.Agent.WebPanel.Security;
+using NewLife.Configuration;
 using NewLife.Log;
 using NewLife.Model;
 using NewLife.Net;
@@ -27,6 +32,27 @@ internal class Program
 {
     private static void Main(String[] args)
     {
+        // 必须最先执行：工作线程尚未创建，此时调整运行时参数才有效
+        TuneRuntime(args);
+
+        // 小内存设备优先：关掉用不到的协议栈，避免多装载一整套程序集
+        TrimRuntimeFeatures();
+
+        // 先按宿主语言初始化日志语言，保证首次写出的配置文件注释即为本地语言，避免稍后改写
+        StarLocalization.InitLogCulture();
+
+        // NativeAOT 下自定义命令处理器的元数据需显式保留
+        AotRoots.Ensure();
+
+        // 自定义命令处理器必须静态注册：NativeAOT 下程序集类型枚举不可靠，反射扫描会静默丢命令。
+        // 依赖上游未发布的 API，仅在本地源码模式下启用；正式包版本仍由反射发现（见 AotRoots 的元数据保留）
+#if LOCAL_NEWLIFE_SOURCE
+        CommandFactory.RegisterCustomFactory(s => new CommandHandler.ListServices(s));
+        CommandFactory.RegisterCustomFactory(s => new CommandHandler.StartService(s));
+        CommandFactory.RegisterCustomFactory(s => new CommandHandler.StopService(s));
+        CommandFactory.RegisterCustomFactory(s => new CommandHandler.RestartService(s));
+#endif
+
 #if NETFRAMEWORK
         // .NET Framework 默认给 POST 附加 Expect: 100-continue 头，请求体要等服务端 100 响应后才发送。
         // 弱网、代理或休眠唤醒场景下容易造成请求体迟到，被服务端按最低速率限制断开（MinRequestBodyDataRate），
@@ -43,12 +69,15 @@ internal class Program
         var msWait = 3_000;
         if ("-upgrade".EqualIgnoreCase(args))
         {
-            XTrace.WriteLine("Update mode started; waiting {0} second(s)", msWait);
+            // 旧进程拉起新版后只等 3 秒就判定冒烟通过并落盘 success，这里多留 3 秒再交接（-restart 重启服务、
+            // -run 正式接管），避免重启动作把旧进程正在写入的事件打断
+            msWait = 6_000;
+            XTrace.WriteLine("Update mode started; waiting {0} second(s)", msWait / 1000);
             Thread.Sleep(msWait);
         }
         else if ("-delay".EqualIgnoreCase(args))
         {
-            XTrace.WriteLine("Delayed startup; waiting {0} second(s)", msWait);
+            XTrace.WriteLine("Delayed startup; waiting {0} second(s)", msWait / 1000);
             Thread.Sleep(msWait);
         }
 
@@ -109,6 +138,193 @@ internal class Program
         svc.Main(args);
     }
 
+    #region 原生分配器调优
+    /// <summary>glibc 分配器参数。见 mallopt(3)，均为负数常量</summary>
+    private const Int32 M_TRIM_THRESHOLD = -1;
+    private const Int32 M_TOP_PAD = -2;
+    private const Int32 M_MMAP_THRESHOLD = -3;
+
+    /// <summary>需要注入给运行时的参数。这些开关都在进程初始化阶段读取，只能通过环境变量生效</summary>
+    /// <remarks>首项同时作为"已经重载过镜像"的标记，见 <see cref="TuneRuntime"/></remarks>
+    private static readonly String[][] _runtimeEnv =
+    [
+        // glibc 分配器：单竞技场 + 空闲堆及时归还
+        ["MALLOC_ARENA_MAX", "1"],
+        ["MALLOC_TRIM_THRESHOLD_", "65536"],
+        ["MALLOC_MMAP_THRESHOLD_", "65536"],
+        ["MALLOC_TOP_PAD_", "0"],
+    ];
+
+    /// <summary>setenv 的托管委托</summary>
+    private delegate Int32 SetEnvFunc(String name, String value, Int32 overwrite);
+
+    /// <summary>unsetenv 的托管委托</summary>
+    private delegate Int32 UnsetEnvFunc(String name);
+
+    /// <summary>execv 的托管委托</summary>
+    private delegate Int32 ExecVFunc(String path, [MarshalAs(UnmanagedType.LPArray, ArraySubType = UnmanagedType.LPStr)] String[] argv);
+
+    /// <summary>mallopt 的托管委托</summary>
+    private delegate Int32 MalloptFunc(Int32 param, Int32 value);
+
+    /// <summary>选择省内存的启动参数，降低边缘小内存设备上的常驻内存</summary>
+    /// <param name="args">命令行参数，只有常驻运行才需要重载镜像</param>
+    /// <remarks>
+    /// glibc 默认为每个线程准备一个内存竞技场（32 位 1MB、64 位 64MB 虚拟空间），并在竞技场内缓存空闲块；
+    /// 星尘代理常驻 20 多个线程，实测在 armv7 设备上仅竞技场就占掉约两成常驻内存。
+    /// 又因为默认的 trim/mmap 阈值偏大，空闲堆长时间不归还操作系统。
+    /// <para>
+    /// 这些开关只能在进程初始化阶段由环境变量决定（运行时 mallopt 改不动，竞技场早已建好），
+    /// 因此这里先设好环境变量并原地重新加载自身镜像（execv，PID 不变，宿主 systemd 无感知）。
+    /// 省下的是几十 MB，代价是启动慢一些（关闭预编译镜像需要全量 JIT）。
+    /// </para>
+    /// <para>
+    /// 关闭 ICU 不在这里做：它要靠 runtimeconfig 里的 <c>System.Globalization.Invariant</c>，
+    /// 才能在运行时初始化阶段就生效——有些嵌入式系统压根没装 ICU，走环境变量注入时
+    /// 进程可能在重载镜像之前就先崩了。
+    /// </para>
+    /// <para>
+    /// 环境变量只对本进程有效，星尘代理会托管大量业务进程，新镜像启动后立即 unsetenv，
+    /// 避免这些参数被业务进程继承而改变它们的运行时行为。
+    /// </para>
+    /// <para>不能写成 DllImport("libc")：Linux 上 libc.so 多是链接脚本，直接按库名加载会失败，需显式逐个尝试真实文件名。</para>
+    /// </remarks>
+    private static void TuneRuntime(String[] args)
+    {
+        if (!Runtime.Linux) return;
+
+#if NET6_0_OR_GREATER
+        // 安装、卸载、启动停止等一次性命令不占用常驻内存，没必要为它们多付一次进程启动
+        if (!IsDaemonMode(args)) return;
+
+        try
+        {
+            if (!TryLoadLibc(out var lib)) return;
+            if (GetExport<SetEnvFunc>(lib, "setenv") is not { } setEnv) return;
+
+            if (Environment.GetEnvironmentVariable(_runtimeEnv[0][0]).IsNullOrEmpty())
+            {
+                // 首次进入：注入环境变量后重启镜像，成功则不会返回
+                foreach (var item in _runtimeEnv) setEnv(item[0], item[1], 1);
+
+                if (GetExport<ExecVFunc>(lib, "execv") is { } execv)
+                {
+                    var cmdline = File.ReadAllBytes("/proc/self/cmdline");
+                    var argv = Encoding.UTF8.GetString(cmdline).TrimEnd('\0').Split('\0');
+                    // execv 要求 argv 以 NULL 结尾，托管数组不会自动补上，缺失时 exec 直接返回 -1
+                    var full = new String[argv.Length + 1];
+                    argv.CopyTo(full, 0);
+                    if (argv.Length > 0 && !argv[0].IsNullOrEmpty()) execv(GetSelfExe(), full);
+                }
+            }
+            else if (GetExport<UnsetEnvFunc>(lib, "unsetenv") is { } unsetEnv)
+            {
+                // 重新加载后的镜像：参数已被 glibc 消费，清掉以免被托管的业务进程继承
+                foreach (var item in _runtimeEnv) unsetEnv(item[0]);
+            }
+
+            // 兜底：exec 不可用（如容器未挂载 /proc）时，阈值类参数仍可在运行时调整
+            if (GetExport<MalloptFunc>(lib, "mallopt") is { } mallopt)
+            {
+                mallopt(M_TRIM_THRESHOLD, 64 * 1024);
+                mallopt(M_MMAP_THRESHOLD, 64 * 1024);
+                mallopt(M_TOP_PAD, 0);
+            }
+        }
+        catch
+        {
+            // 非 glibc（如 musl）或受限环境没有这些接口，保持系统默认即可
+        }
+#endif
+    }
+
+    /// <summary>关闭代理用不到的运行时特性，减少程序集装载</summary>
+    /// <remarks>
+    /// 星尘代理只与服务端做 HTTP/1.1 通信，用不到 HTTP/3。
+    /// .NET 在探测 HTTP/3 支持时会连带装载 <c>System.Net.Quic</c>（约 0.5MB 常驻），
+    /// 在 arm64 设备上实测确实被加载，小内存设备上没有任何收益，统一关掉。
+    /// </remarks>
+    private static void TrimRuntimeFeatures()
+    {
+#if NET6_0_OR_GREATER
+        try
+        {
+            AppContext.SetSwitch("System.Net.SocketsHttpHandler.Http3Support", false);
+        }
+        catch
+        {
+            // 开关名字随运行时版本变化时忽略
+        }
+#endif
+    }
+
+    /// <summary>判断是否为常驻运行模式</summary>    /// <param name="args">命令行参数</param>
+    /// <returns>常驻或交互运行返回真</returns>
+    /// <remarks>安装、卸载等一次性命令不需要为内存优化多付一次进程启动</remarks>
+    private static Boolean IsDaemonMode(String[] args)
+    {
+        if (args == null || args.Length == 0) return true;
+
+        foreach (var item in args)
+        {
+            if (item.IsNullOrEmpty()) continue;
+            if (item.EqualIgnoreCase("-s", "-run", "-restart", "-delay", "-upgrade", "-repair")) return true;
+        }
+
+        return false;
+    }
+
+#if NET6_0_OR_GREATER
+    /// <summary>取当前进程可执行文件的真实路径</summary>
+    /// <returns>真实路径，解析失败时返回 /proc/self/exe</returns>
+    /// <remarks>
+    /// 不能直接把 /proc/self/exe 交给 execv：内核按传入路径的文件名设置进程名，
+    /// 进程名会从 dotnet 变成 exe，平台侧按进程名识别代理的逻辑都会失准。
+    /// </remarks>
+    private static String GetSelfExe()
+    {
+        try
+        {
+            if (File.ResolveLinkTarget("/proc/self/exe", true) is { } target && File.Exists(target.FullName)) return target.FullName;
+        }
+        catch
+        {
+            // 忽略，退回 /proc/self/exe
+        }
+
+        return "/proc/self/exe";
+    }
+
+    /// <summary>加载 libc。逐个尝试真实文件名，兼容 glibc 与 musl</summary>
+    /// <param name="lib">库句柄</param>
+    /// <returns>成功返回真</returns>
+    private static Boolean TryLoadLibc(out IntPtr lib)
+    {
+        foreach (var name in new[] { "libc.so.6", "libc.so", "libc" })
+        {
+            if (NativeLibrary.TryLoad(name, out lib)) return true;
+        }
+
+        lib = IntPtr.Zero;
+        return false;
+    }
+
+    /// <summary>取导出函数并转换为托管委托</summary>
+    /// <typeparam name="TFunc">委托类型</typeparam>
+    /// <param name="lib">库句柄</param>
+    /// <param name="name">导出名</param>
+    /// <returns>委托实例，不存在时返回空</returns>
+    /// <remarks>NativeAOT 只支持泛型重载，非泛型的 Type 版本会在 AOT 下抛 PlatformNotSupportedException</remarks>
+    private static TFunc? GetExport<TFunc>(IntPtr lib, String name) where TFunc : Delegate
+    {
+        if (!NativeLibrary.TryGetExport(lib, name, out var fn) || fn == IntPtr.Zero) return null;
+
+        return Marshal.GetDelegateForFunctionPointer<TFunc>(fn);
+    }
+#endif
+
+    #endregion
+
     /// <summary>用户模式存储配置，方便服务模式读取。因为服务模式无法读取用户和分辨率等信息</summary>
     /// <param name="set"></param>
     private static void LoadUser(StarAgentSetting set)
@@ -164,7 +380,12 @@ internal class MyService : ServiceBase, IServiceProvider
 
         var set = NewLife.Agent.Setting.Current;
         set.WebPort = AgentSetting.LocalPort;
+
+        // StarAgent 以 staragent.config 为唯一配置入口，启动时同步到框架面板配置
+        set.WebBind = AgentSetting.WebBind;
         set.Save();
+
+        ProtectConfigFiles();
 
         var panel = new StarPanel(service);
 
@@ -180,6 +401,16 @@ internal class MyService : ServiceBase, IServiceProvider
         }
 
         return panel;
+    }
+
+    /// <summary>收紧星尘相关配置文件的权限，避免同机低权限用户读取密钥</summary>
+    private static void ProtectConfigFiles()
+    {
+        foreach (var provider in new IConfigProvider?[] { StarSetting.Provider, StarAgentSetting.Provider, NewLife.Agent.Setting.Provider })
+        {
+            if (provider is FileConfigProvider file && !file.FileName.IsNullOrEmpty())
+                WebPanelSecurity.ProtectFile(file.FileName.GetBasePath());
+        }
     }
     #endregion
 
@@ -222,34 +453,7 @@ internal class MyService : ServiceBase, IServiceProvider
 
         WriteLog("Legacy service file detected; correcting KillMode");
 
-        var exe = Process.GetCurrentProcess().MainModule.FileName;
-
-        // 兼容dotnet
-        var args = Environment.GetCommandLineArgs();
-        if (args.Length >= 1)
-        {
-            var fileName = Path.GetFileName(exe);
-            if (exe.Contains(' ')) exe = $"\"{exe}\"";
-
-            var dll = args[0].GetFullPath();
-            if (dll.Contains(' ')) dll = $"\"{dll}\"";
-
-            if (fileName.EqualIgnoreCase("dotnet", "dotnet.exe"))
-                exe += " " + dll;
-            else if (fileName.EqualIgnoreCase("mono", "mono.exe", "mono-sgen"))
-                exe = dll;
-        }
-
-        var service = new ServiceModel
-        {
-            ServiceName = ServiceName,
-            DisplayName = DisplayName,
-            Description = Description,
-            FileName = exe,
-            Arguments = "-s",
-        };
-
-        Host.Install(service);
+        Host.Install(UpgradeHealer.BuildServiceModel(this));
     }
     #endregion
 
@@ -305,11 +509,20 @@ internal class MyService : ServiceBase, IServiceProvider
         // 启动星尘客户端，连接服务端
         StartClient();
 
+        // 自愈历史升级残局：旧版升级失败会留下 *.del 备份、服务入口可能被指向备份文件。
+        // 新版进程启动即清理，设备只需重启一次服务即可完成补升级，无需人工登录机器
+        HealUpgrade();
+
         _Manager.Start();
         StarAgentSetting.Provider.Changed += OnSettingChanged;
 
         // 启动插件
         WriteLog("Starting plugin [{0}]", pm.Identity);
+#if NET5_0_OR_GREATER
+        // NativeAOT 不能加载新的托管程序集，插件只能编译进代理本体
+        if (!System.Runtime.CompilerServices.RuntimeFeature.IsDynamicCodeSupported)
+            WriteLog("NativeAOT build: external plugin assemblies in the plugin directory cannot be loaded; only plugins compiled into the agent are available");
+#endif
         pm.Load();
         pm.Init();
         foreach (var item in pm.Plugins)
@@ -499,6 +712,28 @@ internal class MyService : ServiceBase, IServiceProvider
     }
     #endregion
 
+    /// <summary>自愈历史升级残局</summary>
+    /// <remarks>
+    /// 旧版代理升级失败后，部署目录会残留 *.del 备份、Update 目录残留旧升级包，服务入口也可能被指向备份文件。
+    /// 新版进程启动时清理一次并上报节点事件，设备只需重启一次服务就能完成补升级，不必人工登录机器。
+    /// </remarks>
+    private void HealUpgrade()
+    {
+        try
+        {
+            var msg = UpgradeHealer.Heal(this, XTrace.Log);
+            if (msg.IsNullOrEmpty()) return;
+
+            WriteLog("Upgrade self-heal: {0}", msg);
+            _Client?.WriteInfoEvent("Upgrade", L.TLog("Post-upgrade self-healing on startup: {0}", msg));
+        }
+        catch (Exception ex)
+        {
+            // 自愈失败不能影响服务启动
+            XTrace.WriteException(ex);
+        }
+    }
+
     #region 客户端启动
     public void StartClient()
     {
@@ -597,14 +832,13 @@ internal class MyService : ServiceBase, IServiceProvider
         try
         {
             // 仅 Udp，局域网广播搜索 + 本地进程 UDP RPC；Tcp 由 HttpServer（Web 面板）接管
-            var svr = new ApiServer(new NetUri(NetType.Udp, IPAddress.Any.ToString(), port))
-            {
-                ReuseAddress = true,
-                Tracer = _factory?.Tracer,
-                Log = XTrace.Log,
-                EncoderLog = XTrace.Log,
-            };
-            svr.Register(new StarService
+            var svr = LocalApiServer.CreateServer(new NetUri(NetType.Udp, IPAddress.Any.ToString(), port), _factory?.Tracer, XTrace.Log);
+
+            // 控制器动作方法需要静态保留，才能被 NativeAOT 裁剪后继续分发。
+            // 泛型入口 Register<T>() 会保留 StarService 的方法，并驱动 NewLife.Remoting 源生成器产出静态调用委托；
+            // 实例化好再回填给每个动作，避免依赖容器反射构造与属性注入。
+            svr.Register<StarService>();
+            var service = new StarService
             {
                 Provider = this,
                 //Host = Host,
@@ -613,7 +847,12 @@ internal class MyService : ServiceBase, IServiceProvider
                 StarSetting = StarSetting,
                 AgentSetting = AgentSetting,
                 Log = XTrace.Log
-            }, null);
+            };
+            foreach (var act in svr.Manager.Services.Values)
+            {
+                act.Controller = service;
+            }
+            _container.AddSingleton(service);
 
             _server = svr;
             _container.AddSingleton(svr);

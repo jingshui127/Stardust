@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Reflection;
@@ -13,6 +13,7 @@ using NewLife.Remoting;
 using NewLife.Remoting.Clients;
 using NewLife.Remoting.Models;
 using NewLife.Security;
+using NewLife.Threading;
 using Stardust.Managers;
 using Stardust.Models;
 using Stardust.Monitors;
@@ -45,6 +46,9 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
         SetActions("Node/");
 
         Log = XTrace.Log;
+
+        // NativeAOT 下模型属性必须显式保留，否则序列化为空对象
+        AotRoots.Ensure();
     }
 
     /// <summary>使用客户端设置来初始化</summary>
@@ -62,13 +66,72 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
     public StarClient(String urls) : this() => Server = urls;
     #endregion
 
+    #region 多语言
+    /// <summary>应用平台下发的默认语言。本地配置固定语言时不接受平台默认语言</summary>
+    /// <param name="language">语言名称</param>
+    /// <param name="save">是否保存到核心配置</param>
+    /// <remarks>
+    /// 优先级为本地固定语言 &gt; 平台默认语言 &gt; 系统语言。客户端配置 <c>Star.Language</c> 已固定进程语言时，
+    /// 平台下发的默认语言不能改动界面与日志，也不写入核心配置，避免下次启动被平台语言顶掉。
+    /// 平台下发 <see cref="StarLocalization.AutoLanguage"/> 时清除本机保存的平台语言，恢复系统语言。
+    /// </remarks>
+    protected override void ApplyDefaultLanguage(String? language, Boolean save = true)
+    {
+        if (Setting is StarSetting star && !star.Language.IsNullOrWhiteSpace()) return;
+
+        if (language.EqualIgnoreCase(StarLocalization.AutoLanguage))
+        {
+            ResetDefaultLanguage(save);
+            return;
+        }
+
+        base.ApplyDefaultLanguage(language, save);
+    }
+
+    /// <summary>清除本机保存的平台默认语言，恢复系统语言</summary>
+    /// <param name="save">是否同步清除核心配置</param>
+    private static void ResetDefaultLanguage(Boolean save)
+    {
+        var core = NewLife.Setting.Current;
+        if (save && !core.DefaultLanguage.IsNullOrEmpty())
+        {
+            var old = core.DefaultLanguage;
+            core.DefaultLanguage = "";
+            try
+            {
+                // Save 内部会重新应用语言配置，顺带清空 DefaultCulture
+                core.Save();
+            }
+            catch
+            {
+                // 保存失败时回滚，下一次登录/心跳继续尝试
+                core.DefaultLanguage = old;
+            }
+        }
+
+        // 兼容 save=false、保存失败以及核心配置原本为空的情况
+        var cleared = Localization.DefaultCulture;
+        if (cleared != null)
+        {
+            Localization.SetDefaultLanguage(null);
+            if (Localization.ForcedLanguage == null && Localization.LogCulture?.Name == cleared.Name)
+                Localization.LogCulture = null;
+        }
+    }
+    #endregion
+
     #region 方法
     /// <summary>初始化</summary>
     protected override void OnInit()
     {
         var provider = ServiceProvider ??= ObjectContainer.Provider;
 
+        // 基类盐值取 Runtime.UtcNow，而 Runtime.UtcNow 又走下面的全局时间提供者，因此盐值与业务时间同源
         PasswordProvider = new SaltPasswordProvider { Algorithm = "md5", SaltTime = 60 };
+
+        // 接入星尘即为进程装上「本机时间 + 服务端时间差」的时间源，业务直接用 Runtime.UtcNow 就能屏蔽本机时钟误差
+        if (TimerScheduler.GlobalTimeProvider is not ServerTimeProvider)
+            TimerScheduler.GlobalTimeProvider = new ServerTimeProvider { Client = this };
 
         // 找到容器，注册默认的模型实现，供后续InvokeAsync时自动创建正确的模型对象
         var container = ModelExtension.GetService<IObjectContainer>(provider) ?? ObjectContainer.Current;
@@ -82,6 +145,7 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
 
         base.OnInit();
     }
+
     #endregion
 
     #region 登录
@@ -89,6 +153,8 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
     /// <returns></returns>
     public override ILoginRequest BuildLoginRequest()
     {
+        ApplyServerInfo();
+
         var request = new LoginInfo();
         FillLoginRequest(request);
 
@@ -96,6 +162,31 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
         request.Node = GetNodeInfo();
 
         return request;
+    }
+
+    /// <summary>登录前对齐服务端时间与默认语言</summary>
+    /// <remarks>
+    /// 本机时钟偏差超过盐值窗口时，用本机时间生成的盐值会被服务端判定过期，登录失败并反复重试。
+    /// 登录前先用匿名接口取一次服务端信息，把时间差写入客户端，使盐值按服务端时间生成；
+    /// 同时应用平台默认语言，让登录前的界面与提示也能用平台语言。
+    /// 探测最多等待 <see cref="ServerProbe.WaitTimeout"/>，失败不阻塞登录，保持原有行为。
+    /// </remarks>
+    private void ApplyServerInfo()
+    {
+        // 时间差已经就绪时无需再探测。进程内首次登录才会走到探测，之后由登录响应与心跳维护
+        if (Span != TimeSpan.Zero) return;
+
+        var info = ServerProbe.GetServerInfo(Server ?? Setting?.Server);
+        if (info == null) return;
+
+        if (info.ServerTime > 0)
+        {
+            FixTime(0, info.ServerTime);
+
+            // 时间差跳变多少，按日历调度的定时逻辑就跳多少，写入日志便于解释定时任务的异常触发
+            if (Math.Abs(Span.TotalSeconds) >= 1) WriteLog("Server time offset applied: {0}", Span);
+        }
+        if (!info.DefaultLanguage.IsNullOrWhiteSpace()) ApplyDefaultLanguage(info.DefaultLanguage);
     }
 
     /// <summary>获取设备信息</summary>
@@ -470,7 +561,12 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
     #region 部署
     /// <summary>获取分配到本节点的应用服务信息</summary>
     /// <returns></returns>
-    public Task<DeployInfo[]?> GetDeploy(Int32 deployId, String deployName, String appName) => InvokeAsync<DeployInfo[]>("Deploy/GetAll", new { deployId, deployName, appName });
+    public Task<DeployInfo[]?> GetDeploy(Int32 deployId, String deployName, String appName) => InvokeAsync<DeployInfo[]>("Deploy/GetAll", new Dictionary<String, Object?>
+    {
+        ["deployId"] = deployId,
+        ["deployName"] = deployName,
+        ["appName"] = appName,
+    });
 
     /// <summary>上传本节点的所有应用服务信息</summary>
     /// <param name="services"></param>
@@ -481,5 +577,39 @@ public partial class StarClient : ClientBase, ICommandClient, IEventProvider
     /// <param name="inf"></param>
     /// <returns></returns>
     public Task<Int32> AppPing(AppInfo inf) => InvokeAsync<Int32>("Deploy/Ping", inf);
+    #endregion
+
+    #region 升级
+    private Int32 _upgrading;
+    /// <summary>获取更新信息。如有更新，则下载解压覆盖并重启应用</summary>
+    /// <remarks>
+    /// 心跳定时检查与平台下发的 node/upgrade 命令可能同时触发升级。两个流程同时下载并覆盖同一批文件，
+    /// 会互相破坏安装目录（Linux 下正在运行的 dll 被覆盖还可能直接导致进程崩溃），因此后到者直接跳过。
+    /// </remarks>
+    /// <param name="channel">更新通道</param>
+    /// <param name="version">指定版本。用于手工升级到指定版本，为空时按通道策略匹配</param>
+    /// <param name="cancellationToken">取消令牌</param>
+    /// <returns>更新信息；已有升级进行中时返回null</returns>
+    public override async Task<IUpgradeInfo?> Upgrade(String? channel, String? version, CancellationToken cancellationToken = default)
+    {
+        if (Interlocked.CompareExchange(ref _upgrading, 1, 0) != 0)
+        {
+            // 平台命令会把 null 解释成“无可用更新”，这里补一条事件，让节点历史能看出是“已有升级进行中”
+            var msg = L.TLog("Another upgrade is already in progress; skipping this request.");
+            WriteLog(msg);
+            WriteEvent("info", "Upgrade", msg);
+
+            return null;
+        }
+
+        try
+        {
+            return await base.Upgrade(channel, version, cancellationToken).ConfigureAwait(false);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _upgrading, 0);
+        }
+    }
     #endregion
 }

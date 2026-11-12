@@ -5,7 +5,7 @@
     <AssemblyName>StarWebApi</AssemblyName>
     <RootNamespace>Stardust.Web</RootNamespace>
     <AssemblyTitle>Stardust management API</AssemblyTitle>
-    <Description>Decoupled WebApi backend for the Stardust distributed service platform. Reuses the area controllers and business services of Stardust.Web while exposing only JSON endpoints (GetPage/GetFields/Insert/Update/Delete and custom actions of EntityController), without Razor views, MCP, or static sites, for direct use by the Stardust.Web.Vue frontend.</Description>
+    <Description>Decoupled WebApi backend for the Stardust distributed service platform. Reuses the area controllers and business services of Stardust.Web while exposing JSON endpoints and the MCP endpoint (POST /mcp, via the shared Stardust.Mcp library), without Razor views or static sites, for direct use by the Stardust.Web.Vue frontend and MCP clients.</Description>
     <Company>新生命开发团队</Company>
     <Copyright>©2002-2026 NewLife</Copyright>
     <VersionPrefix>3.7</VersionPrefix>
@@ -46,18 +46,19 @@
   <!-- 纯 API 后端：引用 NuGet 版 NewLife.Cube(API版)，不再链接 Stardust.Web 源码 -->
   <ItemGroup>
     <PackageReference Include="NewLife.IP" Version="2.6.2026.1024" />
-    <PackageReference Include="NewLife.Redis" Version="7.0.2026.1024" />
-    <PackageReference Include="NewLife.Remoting.Extensions" Version="4.0.2026.1024" />
+    <PackageReference Include="NewLife.Redis" Version="7.0.2026.1026-beta0931" />
+    <PackageReference Include="NewLife.Remoting.Extensions" Version="4.0.2026.1109-beta0753" />
     <!-- 魔方 WebAPI 核心库，复用其 EntityController/ApiResponse/AuthController 等纯 API 能力 -->
-    <PackageReference Include="NewLife.Cube" Version="6.15.2026.1018-beta1727" />
+    <PackageReference Include="NewLife.Cube" Version="6.16.2026.1105-beta0802" />
     <!-- 魔方 Swagger/Scalar 依赖的 OpenAPI 文档生成（AddCubeSwagger） -->
-    <PackageReference Include="NewLife.Cube.Swagger" Version="6.15.2026.1018-beta1727" />
+    <PackageReference Include="NewLife.Cube.Swagger" Version="6.16.2026.1105-beta0802" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Stardust.Data\Stardust.Data.csproj" />
     <ProjectReference Include="..\Stardust.Extensions\Stardust.Extensions.csproj" />
     <ProjectReference Include="..\Stardust\Stardust.csproj" />
+    <ProjectReference Include="..\Stardust.Mcp\Stardust.Mcp.csproj" />
   </ItemGroup>
 
   <!-- Program.cs 为顶级语句，隐式 Program 类是 internal 的，集成测试工程需可见才能用 WebApplicationFactory<Program>。

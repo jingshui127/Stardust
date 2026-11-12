@@ -75,7 +75,6 @@
 "Downloading {0}": "{0} indiriliyor"
 "Download: {0}": "İndirme: {0}"
 "Download [{0}]: {1} {2}": "İndirme [{0}]: {1} {2}"
-"Download failed, verification error: {0} (local) != {1} (remote)": "İndirme başarısız, doğrulama hatası: {0} (yerel) != {1} (uzak)"
 "Download completed; ready to overwrite: {0}": "İndirme tamamlandı; üzerine yazmaya hazır: {0}"
 "Download file {0}, success: {1}": "Dosyayı indir {0}, başarılı: {1}"
 "Download file {0}, source: {1}": "Dosyayı indir {0}, kaynak: {1}"
@@ -221,4 +220,4 @@
 "Succeeded": "Başarılı"
 "File [{0}] changed; stopping the application and starting it {1}ms later": "[{0}] dosyası değişti; uygulama durdurulacak ve {1}ms sonra başlatılacak"
 "Stardust distributed core": "Stardust dağıtık çekirdeği"
-"Stardust distributed service framework core library. Provides client SDKs for configuration center, registry, service discovery, distributed tracing, APM, and log center, supporting configuration pulling, service registration and discovery, call tracing, performance and log reporting.": "Stardust dağıtık hizmet çerçevesi çekirdek kitaplığı. Yapılandırma merkezi, kayıt defteri, hizmet bulma, dağıtık izleme, APM ve günlük merkezi için istemci SDK'ları sunar; yapılandırma çekme, hizmet kaydı ve bulma, çağrı izleme ile performans ve günlük raporlamayı destekler."
+"Stardust distributed core client library. One-line integration for configuration delivery, service registration and discovery, distributed tracing, APM and log reporting.": "Stardust dağıtık çekirdek istemci kitaplığı. Yapılandırma dağıtımı, hizmet kaydı ve keşfi, izleme, APM ve günlük raporlama için tek satırlık entegrasyon."

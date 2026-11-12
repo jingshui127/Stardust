@@ -3,6 +3,8 @@ using NewLife;
 using NewLife.Configuration;
 using NewLife.Remoting.Models;
 using NewLife.Security;
+using Stardust.Models;
+using Stardust.Server.Services;
 using XCode.Configuration;
 
 namespace Stardust.Server;
@@ -17,10 +19,32 @@ public enum ClearModes
     Delete = 2,
 }
 
+/// <summary>首页概览展示模式</summary>
+public enum HomeSummaryModes
+{
+    /// <summary>不展示。隐藏规模数据，只保留安装引导</summary>
+    Hidden = 1,
+
+    /// <summary>量级。保留数量级（如 1,000+）足以体现规模，不泄露精确运营数据</summary>
+    Magnitude = 2,
+
+    /// <summary>精确。内网或自有部署可直接展示真实数量</summary>
+    Exact = 3,
+}
+
 /// <summary>配置</summary>
 [Config("StarServer")]
 public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
 {
+    /// <summary>默认忽略错误的埋点。旧版 SDK 在未安装或未启动星尘代理的机器上探测 rpc:Info 必然失败</summary>
+    public const String DefaultIgnoreErrorItems = "rpc:Info";
+
+    /// <summary>默认忽略的异常关键字。客户端提前断开、WebSocket 对端未完成关闭握手等传输层中断不是应用故障</summary>
+    public const String DefaultIgnoreErrorKeywords = "BadHttpRequestException,Unexpected end of request content," +
+        "The client disconnected,The request was aborted,Connection reset by peer," +
+        "An existing connection was forcibly closed,Broken pipe," +
+        "The remote party closed the WebSocket connection,The WebSocket connection was closed unexpectedly";
+
     #region 静态
     static StarServerSetting() => Provider = new DbConfigProvider { UserId = 0, Category = "StarServer" };
     #endregion
@@ -30,13 +54,18 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     //[Description("调试开关。默认true")]
     //public Boolean Debug { get; set; } = true;
 
-    /// <summary>界面语言。如 zh-Hans、zh-Hant、en、ja，留空时按请求语言识别，Web 之外跟随系统语言</summary>
-    [Description("UI language, for example zh-Hans, zh-Hant, en, or ja; leave empty to detect from each request in web hosts and to follow the system language otherwise")]
-    public String? Language { get; set; }
-
     /// <summary>服务端口。默认6600</summary>
     [Description("Service port. Default 6600.")]
     public Int32 Port { get; set; } = 6600;
+
+    /// <summary>默认语言。平台下发给客户端的默认语言，并作为无语言声明请求的界面兜底</summary>
+    /// <remarks>
+    /// 请求未携带语言时作为服务端界面与消息的兜底，并随登录/心跳下发给客户端；不改变服务端日志语言。
+    /// 支持 zh-Hans、zh-Hant、en 等词表语言，无法识别的值回退核心配置。
+    /// 平台与核心都未配置默认语言时下发 auto，新版客户端据此清除本机保存的平台语言并恢复系统语言。
+    /// </remarks>
+    [Description("Default language. Pushed to clients on login and heartbeat, e.g. zh-Hans or en; empty uses the core configuration DefaultLanguage.")]
+    public String DefaultLanguage { get; set; } = "";
 
     /// <summary>令牌密钥。用于生成JWT令牌的算法和密钥，如HS256:ABCD1234</summary>
     [Description("Token secret. Algorithm and secret used to generate JWT tokens, e.g. HS256:ABCD1234")]
@@ -61,6 +90,10 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     /// <summary>应用自动注册。允许应用客户端自动注册，默认true</summary>
     [Description("Application auto-registration. Allow app clients to register automatically; default true")]
     public Boolean AppAutoRegister { get; set; } = true;
+
+    /// <summary>默认重注册模式。应用“重注册模式=默认”时统一采用该策略，默认开放；可在应用里显式覆盖，全局设为关闭即可整体收紧</summary>
+    [Description("Default re-registration mode for applications that follow the global setting: open, trusted access, temporary, or off. Default open.")]
+    public ReRegisterModes ReRegister { get; set; } = ReRegisterModes.Open;
 
     /// <summary>准入白名单。若指定，仅允许符合IP条件的节点进行注册，多个逗号隔开，支持*模糊匹配</summary>
     [Description("Admission whitelist. If specified, only nodes matching the IP conditions may register; separate multiple entries with commas; supports * wildcard matching")]
@@ -150,9 +183,17 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     [Description("Fixed city. By default, the city is calculated automatically from the IP. When enabled, automatic calculation stops and the city is set manually")]
     public Boolean FixedCity { get; set; }
 
-    /// <summary>调用链允许匿名。允许未登录用户访问/trace调用链页面，监控数据可能含敏感信息，默认false</summary>
-    [Description("Allow anonymous trace access. Allow unauthenticated users to access the /trace trace page; monitoring data may contain sensitive information. Default false.")]
+    /// <summary>调用链允许匿名。允许未登录用户访问/trace调用链页面，仅限内网或公开演示部署；监控数据含请求参数、异常堆栈与客户端IP，默认false</summary>
+    [Description("Allow anonymous trace access. Allow unauthenticated users to access the /trace page; intended only for intranet or public demo deployments. Monitoring data includes request parameters, exception stacks and client IPs. Default false.")]
     public Boolean TraceAnonymous { get; set; } = false;
+
+    /// <summary>调用链分享有效期。登录用户生成分享链接的有效期，单位分钟，默认1440（24小时）；小于等于0表示长期有效</summary>
+    [Description("Trace share link validity in minutes for signed-in users; default 1440 (24 hours); 0 or less means permanent.")]
+    public Int32 TraceShareExpire { get; set; } = 1440;
+
+    /// <summary>调用链分享密钥。签名分享链接的HMAC密钥，为空时自动生成并持久化；轮换该密钥将使全部分享链接失效</summary>
+    [Description("Trace share secret. HMAC secret used to sign share links; auto-generated and persisted when empty. Rotating it invalidates all share links.")]
+    public String TraceShareSecret { get; set; }
 
     /// <summary>dotNet同步周期。从官网抓取.NET运行时安装包信息，0表示禁用，单位秒，默认43200（12小时）</summary>
     [Description("dotNet sync interval. Fetch .NET runtime installer info from the official site, 0 disables, unit: seconds, default 43200 (12 hours)")]
@@ -165,6 +206,19 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     /// <summary>星尘资源下载基础地址。StarAgent安装包/一键脚本等资源的基础URL，.NET运行时脚本位于其同级dotnet/目录，默认官方地址</summary>
     [Description("Stardust resource download base address. Base URL for StarAgent installers/scripts; defaults to the official address")]
     public String AgentDownloadBaseUrl { get; set; } = "https://x.newlifex.com/star/";
+
+    /// <summary>安装引导服务端地址。安装页面与安装脚本告诉 StarAgent 连接的服务端地址，如 https://star.example.com:6600；为空时取请求地址</summary>
+    /// <remarks>反向代理或端口映射导致外部地址与请求地址不一致时必须显式配置</remarks>
+    [Description("Agent server address used by the install page and install scripts, e.g. https://star.example.com:6600. Empty means the request address.")]
+    public String AgentServerUrl { get; set; } = "";
+
+    /// <summary>启用安装引导页。启用后根路径返回安装引导页面，默认true</summary>
+    [Description("Enable the install guide page at the root path. Default true.")]
+    public Boolean EnableInstallPage { get; set; } = true;
+
+    /// <summary>首页概览展示模式。默认量级，公网部署只显示数量级而不泄露精确运营数据</summary>
+    [Description("Home summary display mode. Magnitude hides exact figures, Exact shows real numbers, Hidden hides the summary.")]
+    public HomeSummaryModes HomeSummaryMode { get; set; } = HomeSummaryModes.Magnitude;
 
     ///// <summary>新服务器。节点自动迁移到新的服务器地址</summary>
     //[Description("新服务器。节点自动迁移到新的服务器地址")]
@@ -182,9 +236,21 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     [Description("MCP action set. Comma-separated module names (node/app/config/deploy/gateway/monitor/system), * means all enabled")]
     public String McpActionSet { get; set; } = "*";
 
+    /// <summary>敏感配置 key 关键词列表。配置项 key 名包含任一关键词（大小写不敏感）→ 视为敏感项，值一律返回 ***。逗号分隔。通用敏感配置，配置中心、MCP、审计等所有敏感值出口共用。</summary>
+    [Description("Sensitive config key keywords. Comma-separated; a key containing any keyword (case-insensitive) is treated as sensitive and its value is masked as ***. Shared by all sensitive-value outputs, not specific to MCP.")]
+    public String SensitiveKeywords { get; set; } = "db,database,redis,mysql,mssql,connectionstring,password,passwd,secret,token,apikey,access_key";
+
     /// <summary>限流路径前缀。逗号分隔，命中则按IP限流，默认登录/令牌等认证接口</summary>
     [Description("Rate limit path prefixes. Comma-separated; matching paths are rate-limited by IP; defaults to authentication endpoints such as login/token")]
     public String RateLimitPaths { get; set; } = "/App/Login,/Node/Login,/OAuth/Token,/App/Register";
+
+    /// <summary>忽略错误的埋点。逗号分隔，支持*通配；命中埋点的错误数不计入应用错误率和告警。默认忽略旧版客户端的本地代理探测 rpc:Info，该探测在未启动本地代理时必然失败</summary>
+    [Description("Error-ignored trace items. Comma-separated, supports * wildcard; errors of matching items are excluded from application error rate and alarms. Defaults to rpc:Info, the local agent probe of legacy clients which always fails when no local agent is running")]
+    public String IgnoreErrorItems { get; set; } = DefaultIgnoreErrorItems;
+
+    /// <summary>忽略的异常关键字。逗号分隔，命中即视为传输层中断（客户端提前断开等），不计入应用错误率。为空时使用默认规则</summary>
+    [Description("Ignored error keywords. Comma-separated; matching errors are treated as transport-level aborts (e.g. client disconnected) and excluded from the application error rate. Empty uses defaults")]
+    public String IgnoreErrorKeywords { get; set; } = DefaultIgnoreErrorKeywords;
 
     /// <summary>限流次数。每IP每分钟允许访问次数，默认60</summary>
     [Description("Rate limit count. Number of requests allowed per IP per minute; default 60")]
@@ -212,6 +278,18 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     #endregion
 
     #region 方法
+    /// <summary>获取下发给客户端的默认语言。平台设置优先于核心配置</summary>
+    /// <param name="defaultLanguage">核心配置默认语言</param>
+    /// <returns>语言名称；平台与核心都未配置时返回 auto，通知客户端清除本机保存的平台语言</returns>
+    public String? GetDefaultLanguage(String? defaultLanguage)
+    {
+        if (!DefaultLanguage.IsNullOrWhiteSpace())
+            return StarLocalization.NormalizeCulture(DefaultLanguage) ?? defaultLanguage;
+
+        // 平台未配置且核心也未配置时下发 auto，让新版客户端恢复系统语言；旧客户端忽略该值
+        return defaultLanguage.IsNullOrEmpty() ? StarLocalization.AutoLanguage : defaultLanguage;
+    }
+
     /// <summary>加载时触发</summary>
     protected override void OnLoaded()
     {

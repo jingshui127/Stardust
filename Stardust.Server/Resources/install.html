@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>星尘 Stardust · 服务端</title>
+<link rel="icon" type="image/png" href="/install/leaf.png" />
+<style>
+    :root {
+        --ink: #0b1220;
+        --ink-2: #2b3648;
+        --muted: #6b7a90;
+        --line: #e6ebf2;
+        --surface: #ffffff;
+        --bg: #f3f6fb;
+        --brand: #4f46e5;
+        --brand-2: #0ea5e9;
+        --ok: #059669;
+        --radius: 18px;
+        --shadow-sm: 0 1px 2px rgba(11, 18, 32, .05);
+        --shadow: 0 1px 2px rgba(11, 18, 32, .04), 0 18px 40px -28px rgba(11, 18, 32, .38);
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+        margin: 0;
+        color: var(--ink);
+        background:
+            radial-gradient(1100px 520px at 8% -10%, rgba(79, 70, 229, .09), transparent 62%),
+            radial-gradient(900px 480px at 96% 4%, rgba(14, 165, 233, .10), transparent 58%),
+            var(--bg);
+        font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+        -webkit-font-smoothing: antialiased;
+    }
+    .page { max-width: 1100px; margin: 0 auto; padding: 22px 20px 72px; }
+
+    /* ---------- 顶栏 ---------- */
+    .topbar { display: flex; align-items: center; justify-content: space-between; padding: 6px 2px 22px; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand .mark {
+        width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center;
+        background: #ffffff; overflow: hidden;
+        box-shadow: 0 10px 22px -12px rgba(16, 185, 129, .55), inset 0 0 0 1px rgba(16, 185, 129, .12);
+    }
+    .brand .mark img { width: 32px; height: 32px; display: block; object-fit: contain; }
+    .brand b { display: block; font-size: 15px; letter-spacing: -.01em; }
+    .brand small { display: block; color: var(--muted); font-size: 12px; font-weight: 400; }
+    .ghost {
+        appearance: none; border: 1px solid var(--line); background: rgba(255, 255, 255, .8);
+        color: var(--ink-2); padding: 7px 14px; border-radius: 11px; font-size: 13px;
+        cursor: pointer; transition: .18s; backdrop-filter: blur(6px);
+    }
+    .ghost:hover { border-color: #cfd8e6; color: var(--ink); box-shadow: var(--shadow-sm); }
+
+    /* ---------- 主视觉 ---------- */
+    .hero {
+        position: relative; overflow: hidden; border-radius: 26px; color: #eef2ff;
+        background:
+            radial-gradient(760px 340px at 92% -30%, rgba(56, 189, 248, .42), transparent 62%),
+            radial-gradient(680px 380px at 4% 130%, rgba(99, 102, 241, .55), transparent 60%),
+            linear-gradient(140deg, #070b16 0%, #101a30 48%, #0d1729 100%);
+        padding: 44px 40px 40px;
+        box-shadow: 0 40px 80px -60px rgba(6, 10, 22, .95);
+        display: grid; grid-template-columns: .9fr 1.1fr; gap: 26px 36px; align-items: center;
+    }
+    .hero::after {
+        content: ""; position: absolute; inset: 0; pointer-events: none;
+        background-image: linear-gradient(rgba(148, 163, 184, .05) 1px, transparent 1px),
+                          linear-gradient(90deg, rgba(148, 163, 184, .05) 1px, transparent 1px);
+        background-size: 44px 44px;
+        mask-image: radial-gradient(70% 60% at 50% 40%, #000, transparent);
+    }
+    .hero > * { position: relative; z-index: 1; }
+    .eyebrow { display: inline-flex; align-items: center; gap: 10px; font-size: 11.5px; letter-spacing: .18em; text-transform: uppercase; color: #a5b4fc; }
+    .eyebrow::before { content: ""; width: 26px; height: 1px; background: linear-gradient(90deg, #6366f1, #38bdf8); }
+    .hero h1 { margin: 14px 0 12px; font-size: 38px; line-height: 1.15; letter-spacing: -.025em; font-weight: 660; }
+    .hero h1 em { font-style: normal; background: linear-gradient(120deg, #a5b4fc, #7dd3fc); -webkit-background-clip: text; background-clip: text; color: transparent; }
+    .hero .lead { margin: 0 0 24px; color: #a9b6cd; font-size: 15px; max-width: 44ch; }
+    .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+    .chip {
+        font-size: 12px; color: #cbd5e1; border: 1px solid rgba(148, 163, 184, .24);
+        background: rgba(148, 163, 184, .10); padding: 3px 10px; border-radius: 999px;
+    }
+    .server-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .server-row .label { font-size: 11.5px; color: #8fa0b8; letter-spacing: .04em; }
+    .hero-link {
+        display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: #c7d2fe;
+        border: 1px solid rgba(148, 163, 184, .3); padding: 5px 12px; border-radius: 9px;
+        text-decoration: none; transition: .18s;
+    }
+    .hero-link:hover { background: rgba(148, 163, 184, .16); color: #e0e7ff; }
+
+    /* 趋势曲线 */
+    .trend {
+        grid-column: 1 / -1; display: grid; grid-template-columns: max-content 1fr; gap: 22px; align-items: center;
+        border-top: 1px solid rgba(148, 163, 184, .14); padding-top: 18px; margin-top: 6px;
+    }
+    .trend-head { font-size: 11.5px; color: #8fa0b8; line-height: 1.5; }
+    .trend-head b { display: block; color: #dbe6f6; font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+    .spark { width: 100%; height: 58px; display: block; overflow: visible; }
+    #sparkLine { stroke-dasharray: 700; stroke-dashoffset: 700; transition: stroke-dashoffset .95s ease; }
+    #sparkLine.on { stroke-dashoffset: 0; }
+    #sparkDot { opacity: 0; transition: opacity .3s ease .8s; }
+    #sparkDot.on { opacity: 1; }
+    .server-chip {
+        display: inline-flex; align-items: center; gap: 8px;
+        font-family: var(--mono); font-size: 13px; color: #e2e8f0;
+        background: rgba(148, 163, 184, .14); border: 1px solid rgba(148, 163, 184, .22);
+        padding: 6px 8px 6px 12px; border-radius: 10px; word-break: break-all;
+    }
+    .server-chip button {
+        appearance: none; border: none; cursor: pointer; color: #93c5fd; background: transparent;
+        font-size: 12px; padding: 2px 6px; border-radius: 6px;
+    }
+    .server-chip button:hover { background: rgba(147, 197, 253, .16); }
+
+    /* 平台统计 */
+    .stats {
+        grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px; margin: 4px 0 0;
+    }
+    @media (max-width: 900px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    .stat {
+        padding: 9px 12px; border-radius: 12px; min-width: 0; display: block;
+        background: rgba(148, 163, 184, .09); border: 1px solid rgba(148, 163, 184, .16);
+        color: inherit; text-decoration: none;
+    }
+    .stat[href] { cursor: pointer; }
+    .stat[href]:hover { background: rgba(148, 163, 184, .16); border-color: rgba(148, 163, 184, .3); }
+    .stat b {
+        display: block; font-size: 20px; line-height: 1.3; letter-spacing: -.02em;
+        font-variant-numeric: tabular-nums; color: #f1f5fd;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .stat span { display: block; font-size: 11.5px; color: #8fa0b8; letter-spacing: .04em; }
+    .stat small { display: block; font-size: 11px; color: #7d8ca4; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .stat:hover { background: rgba(148, 163, 184, .14); border-color: rgba(148, 163, 184, .26); }
+
+    .cmd { background: rgba(6, 10, 20, .62); border: 1px solid rgba(148, 163, 184, .18); border-radius: 16px; padding: 18px 20px; backdrop-filter: blur(8px); display: flex; flex-direction: column; justify-content: flex-start; gap: 12px; }
+    .tabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: 10px; background: rgba(148, 163, 184, .13); }
+    .tabs button {
+        appearance: none; border: none; cursor: pointer; font-size: 12px; color: #a8b6cb;
+        background: transparent; padding: 5px 13px; border-radius: 8px; transition: .18s;
+    }
+    .tabs button.on { background: rgba(226, 232, 240, .92); color: #0b1220; font-weight: 600; }
+    .cmd-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+    .cmd-label { font-size: 11.5px; letter-spacing: .1em; text-transform: uppercase; color: #7c8ca4; }
+    .cmd pre {
+        margin: 14px 0 0; padding: 12px 14px; border-radius: 12px;
+        background: rgba(2, 6, 16, .55); border: 1px solid rgba(148, 163, 184, .12);
+        color: #dbe6f6; font-family: var(--mono); font-size: 12px; line-height: 1.9;
+        white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal; min-height: 62px;
+    }
+    .cmd-foot { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+    .field {
+        appearance: none; border: 1px solid rgba(148, 163, 184, .26); background: rgba(12, 19, 34, .8);
+        color: #dbe6f6; border-radius: 9px; padding: 6px 10px; font-size: 12.5px; cursor: pointer;
+    }
+    .field option { color: #0b1220; }
+    .primary {
+        appearance: none; border: none; cursor: pointer; font-size: 12.5px; font-weight: 620;
+        color: #060b14; background: linear-gradient(135deg, #a5b4fc, #7dd3fc);
+        padding: 8px 16px; border-radius: 10px; transition: .18s;
+    }
+    .primary:hover { filter: brightness(1.05); transform: translateY(-1px); }
+    .tip { font-size: 12px; color: #7dd3fc; min-height: 16px; }
+    .auto-hint { font-size: 11.5px; color: #8fa0b8; }
+
+    /* ---------- 卡片 ---------- */
+    .card {
+        background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+        padding: 24px 26px 26px; margin-top: 22px; box-shadow: var(--shadow);
+        animation: fade-up .5s both;
+    }
+    .card:nth-of-type(1) { animation-delay: .03s; }
+    .card:nth-of-type(2) { animation-delay: .08s; }
+    .card:nth-of-type(3) { animation-delay: .13s; }
+    @keyframes fade-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+    .card-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 6px; }
+    .card-head h2 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 17px; font-weight: 640; letter-spacing: -.015em; }
+    .card-head h2::before {
+        content: ""; width: 4px; height: 16px; border-radius: 2px; flex: none;
+        background: linear-gradient(180deg, var(--brand), var(--brand-2));
+    }
+    .card-head h2 .sub { color: var(--muted); font-size: 12.5px; font-weight: 400; letter-spacing: 0; }
+    .card-head .tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .select {
+        appearance: none; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2);
+        border-radius: 10px; padding: 7px 12px; font-size: 13px; cursor: pointer; transition: .18s;
+    }
+    .select:hover { border-color: #cfd8e6; }
+
+    .table-wrap { margin-top: 16px; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    thead th {
+        text-align: left; font-weight: 500; font-size: 11.5px; letter-spacing: .09em; text-transform: uppercase;
+        color: #8a97ab; padding: 0 12px 10px; border-bottom: 1px solid var(--line); white-space: nowrap;
+    }
+    tbody td { padding: 13px 12px; border-bottom: 1px solid #f2f5fa; vertical-align: middle; }
+    tbody tr { transition: background .16s; }
+    tbody tr:hover { background: #f8fafd; }
+    tbody tr:last-child td { border-bottom: none; }
+    .mono { font-family: var(--mono); font-size: 12.5px; color: var(--ink-2); }
+    .file { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .num { text-align: right; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .pill {
+        display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px;
+        font-size: 12px; font-weight: 500; background: #eef2ff; color: #4338ca; border: 1px solid #e0e7ff;
+    }
+    .pill::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; opacity: .7; }
+    .pill.grey { background: #f4f6fa; color: #5b6b82; border-color: #e6ebf2; }
+    .pill.green { background: #ecfdf5; color: var(--ok); border-color: #d1fae5; }
+    .dl {
+        display: inline-flex; align-items: center; gap: 6px; text-decoration: none; white-space: nowrap;
+        color: var(--brand); font-size: 13px; font-weight: 560; padding: 5px 11px; border-radius: 9px;
+        border: 1px solid #e0e7ff; background: #f7f9ff; transition: .16s;
+    }
+    .dl:hover { background: #eef2ff; border-color: #c7d2fe; transform: translateY(-1px); }
+    .empty { color: var(--muted); font-size: 13px; padding: 22px 4px; text-align: center; }
+
+    /* 运行时磁贴 */
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(248px, 1fr)); gap: 12px; margin-top: 18px; }
+    .tile {
+        border: 1px solid var(--line); border-radius: 14px; padding: 14px 15px; background: #fcfdff;
+        display: flex; flex-direction: column; gap: 8px; transition: .18s;
+    }
+    .tile:hover { border-color: #cfd8e6; box-shadow: var(--shadow); transform: translateY(-2px); }
+    .tile .v { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .tile .v b { font-family: var(--mono); font-size: 14px; letter-spacing: -.01em; }
+    .tile .meta { display: flex; gap: 6px; flex-wrap: wrap; }
+    .tile .fname { font-family: var(--mono); font-size: 11.5px; color: #7a889c; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tile .foot { display: flex; align-items: center; justify-content: space-between; margin-top: 2px; }
+
+    /* 说明 */
+    .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 18px; }
+    .note { display: flex; gap: 12px; padding: 14px 16px; border-radius: 14px; background: #f8fafd; border: 1px solid #eef2f7; }
+    .note .ico {
+        flex: none; width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+        background: #eef2ff; color: #4338ca; font-size: 14px;
+    }
+    .note b { display: block; font-size: 13.5px; margin-bottom: 2px; }
+    .note span { font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+
+    /* 运行时折叠区 */
+    .runtime-box summary { list-style: none; cursor: pointer; }
+    .runtime-box summary::-webkit-details-marker { display: none; }
+    .runtime-box summary::after { content: "▾"; color: var(--muted); transition: .2s; }
+    .runtime-box[open] summary::after { transform: rotate(180deg); }
+
+    details.mirror { margin-top: 22px; }
+    details.mirror summary {
+        cursor: pointer; list-style: none; color: var(--muted); font-size: 13px;
+        padding: 15px 20px; background: rgba(255, 255, 255, .7); border: 1px dashed var(--line); border-radius: 14px;
+        transition: .18s;
+    }
+    details.mirror summary::-webkit-details-marker { display: none; }
+    details.mirror summary::after { content: "▾"; float: right; transition: .2s; }
+    details.mirror[open] summary::after { transform: rotate(180deg); }
+    details.mirror summary:hover { color: var(--ink-2); border-color: #cfd8e6; }
+
+    footer { text-align: center; color: #94a3b8; font-size: 12px; padding-top: 34px; }
+
+    /* 支持平台 */
+    .platforms { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding: 16px 24px; }
+    .plat-title { font-size: 12px; letter-spacing: .08em; color: var(--muted); text-transform: uppercase; }
+    .plat-list { display: flex; gap: 18px; flex-wrap: wrap; }
+    .plat { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .dot.win { background: #0ea5e9; }
+    .dot.linux { background: #f59e0b; }
+    .dot.mac { background: #94a3b8; }
+    .dot.android { background: #22c55e; }
+    .dot.ios { background: #a78bfa; }
+    .dot.web { background: #cbd5e1; }
+
+    :focus-visible { outline: 2px solid rgba(99, 102, 241, .55); outline-offset: 2px; border-radius: 8px; }
+
+    /* 尊重系统“减少动效”设置 */
+    @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { animation: none !important; transition: none !important; }
+        #sparkLine { stroke-dashoffset: 0; }
+        #sparkDot { opacity: 1; }
+    }
+
+    @media (max-width: 900px) {
+        .hero { grid-template-columns: 1fr; padding: 30px 22px; gap: 28px; }
+        .hero h1 { font-size: 29px; }
+        .card { padding: 20px 16px; }
+        .page { padding: 18px 14px 56px; }
+    }
+</style>
+</head>
+<body>
+<div class="page">
+    <div class="topbar">
+        <div class="brand">
+            <div class="mark"><img src="/install/leaf.png" alt="" /></div>
+            <div><b>星尘 Stardust</b><small data-i18n="brandSub">分布式服务与运维平台</small></div>
+        </div>
+        <button class="ghost" id="langBtn">English</button>
+    </div>
+
+    <section class="hero">
+        <div>
+            <div class="eyebrow">Stardust Platform</div>
+            <h1>星尘 <em>Stardust</em></h1>
+            <p class="lead" data-i18n="lead">节点管理、应用中心、配置中心、注册发现、链路监控与发布部署。节点与应用在这里统一接入。</p>
+            <div class="chips">
+                <span class="chip" data-i18n="modNode">节点管理</span>
+                <span class="chip" data-i18n="modConfig">配置中心</span>
+                <span class="chip" data-i18n="modReg">注册发现</span>
+                <span class="chip" data-i18n="modDeploy">发布部署</span>
+                <span class="chip" data-i18n="modTrace">链路监控</span>
+            </div>
+            <div class="server-row">
+                <span class="label" data-i18n="server">服务端</span>
+                <span class="server-chip"><span id="server">-</span><button id="copyServer" data-i18n="copy">复制</button></span>
+                <span class="chip" id="versionChip">-</span>
+                <span class="chip" id="uptimeChip">-</span>
+                <a class="hero-link" id="consoleBtn" hidden target="_blank" rel="noopener"></a>
+            </div>
+        </div>
+
+        <div class="cmd">
+            <div class="cmd-head">
+                <span class="cmd-label" data-i18n="command">一键安装</span>
+                <div class="tabs" id="osTabs">
+                    <button data-os="linux" class="on">Linux / macOS</button>
+                    <button data-os="windows">Windows</button>
+                </div>
+            </div>
+            <pre id="command">-</pre>
+            <div class="cmd-foot">
+                <button class="primary" id="copyBtn" data-i18n="copyCommand">复制命令</button>
+                <span class="tip" id="copyTip"></span>
+            </div>
+            <div class="auto-hint" id="autoHint"></div>
+        </div>
+
+        <div class="stats" id="statsBlock" hidden>
+            <a class="stat" data-path="/Nodes/NodeOnline"><b id="stNodeOnline">-</b><span data-i18n="stNode">在线节点</span><small id="stNodeSub">-</small></a>
+            <a class="stat" data-path="/Registry/AppOnline"><b id="stAppOnline">-</b><span data-i18n="stApp">在线应用</span><small id="stAppSub">-</small></a>
+            <a class="stat" data-path="/Monitors/AppDayStat"><b id="stTodayCall">-</b><span data-i18n="stCall">今日调用</span><small id="stCallSub">-</small></a>
+            <a class="stat" data-path="/Monitors/AppDayStat"><b id="stTodayError">-</b><span data-i18n="stError">今日错误</span><small id="stErrorSub">-</small></a>
+        </div>
+
+        <div class="trend" id="trendBlock" hidden>
+            <div class="trend-head">
+                <b data-i18n="trendTitle">近 7 天调用趋势</b>
+                <span data-i18n="trendHint">仅展示形状</span>
+            </div>
+            <svg viewBox="0 0 300 64" preserveAspectRatio="none" class="spark" aria-hidden="true">
+                <defs>
+                    <linearGradient id="sparkFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stop-color="#7dd3fc" stop-opacity=".34" />
+                        <stop offset="100%" stop-color="#7dd3fc" stop-opacity="0" />
+                    </linearGradient>
+                </defs>
+                <path id="sparkArea" fill="url(#sparkFill)"></path>
+                <path id="sparkLine" fill="none" stroke="#7dd3fc" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+                <circle id="sparkDot" r="3" fill="#e0f2fe"></circle>
+            </svg>
+        </div>
+    </section>
+
+    <section class="card">
+        <div class="card-head">
+            <h2><span class="sub" data-i18n="packages">安装包</span><span class="sub" data-i18n="packagesHint">StarAgent 客户端</span></h2>
+            <div class="tools">
+                <select class="select" id="versionSel"></select>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th data-i18n="colOS">平台</th>
+                        <th data-i18n="colArch">架构</th>
+                        <th data-i18n="colRuntime">运行时</th>
+                        <th data-i18n="colFile">文件</th>
+                        <th class="num" data-i18n="colSize">大小</th>
+                        <th data-i18n="colAction">下载</th>
+                    </tr>
+                </thead>
+                <tbody id="agentTable"></tbody>
+            </table>
+            <div class="empty" id="agentEmpty" hidden data-i18n="emptyAgent">该版本暂未发布安装包，可先用下方公共镜像</div>
+        </div>
+    </section>
+
+    <section class="card" id="nativeCard" hidden>
+        <div class="card-head">
+            <h2><span class="sub" data-i18n="native">原生 Agent</span><span class="sub" data-i18n="nativeHint">Go / Rust / C++ 轻量版本</span></h2>
+        </div>
+        <div class="table-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th data-i18n="colOS">平台</th>
+                        <th data-i18n="colArch">架构</th>
+                        <th data-i18n="colRuntime">运行时</th>
+                        <th data-i18n="colFile">文件</th>
+                        <th class="num" data-i18n="colSize">大小</th>
+                        <th data-i18n="colAction">下载</th>
+                    </tr>
+                </thead>
+                <tbody id="nativeTable"></tbody>
+            </table>
+        </div>
+    </section>
+
+    <details class="card runtime-box" id="runtimeBox">
+        <summary class="card-head">
+            <h2><span class="sub" data-i18n="runtime">.NET 运行时</span><span class="sub" data-i18n="runtimeHint">缺少运行时的机器先装这个</span></h2>
+            <span class="pill grey" id="runtimeCount">-</span>
+        </summary>
+        <div class="tiles" id="runtimeTiles"></div>
+        <div class="empty" id="runtimeEmpty" hidden data-i18n="empty">该版本暂未发布安装包</div>
+    </details>
+
+    <details class="mirror" id="mirrorBox">
+        <summary data-i18n="mirror">公共镜像（服务端未维护安装包时兜底）</summary>
+        <p data-i18n="mirrorHint" style="margin:0 0 8px;font-size:12px;opacity:.6">6/8/10 为通用包，Linux 取 tar.gz、Windows 取 zip；只有 net45 限 Windows</p>
+        <div class="card" style="margin-top:12px">
+            <div class="table-wrap" style="margin-top:0">
+                <table>
+                    <thead>
+                        <tr>
+                            <th data-i18n="colOS">平台</th>
+                            <th data-i18n="colArch">架构</th>
+                            <th data-i18n="colRuntime">运行时</th>
+                            <th data-i18n="colFile">文件</th>
+                            <th class="num" data-i18n="colSize">大小</th>
+                            <th data-i18n="colAction">下载</th>
+                        </tr>
+                    </thead>
+                    <tbody id="mirrorTable"></tbody>
+                </table>
+            </div>
+        </div>
+    </details>
+
+    <section class="card">
+        <div class="notes">
+            <div class="note">
+                <div class="ico">⚙</div>
+                <div><b data-i18n="note1t">需要管理员权限</b><span data-i18n="note1">脚本会安装 .NET 运行时与 StarAgent 系统服务，Linux 用 sudo、Windows 用管理员 PowerShell。</span></div>
+            </div>
+            <div class="note">
+                <div class="ico">⌁</div>
+                <div><b data-i18n="note2t">自动注册到本站</b><span data-i18n="note2">安装时写入服务端地址，代理启动后会带上硬件信息自动注册，无需手工配置。</span></div>
+            </div>
+            <div class="note">
+                <div class="ico">↻</div>
+                <div><b data-i18n="note3t">后续可在线升级</b><span data-i18n="note3">完整版支持平台下发升级包，原生版本可通过引导安装切换到完整版。</span></div>
+            </div>
+        </div>
+    </section>
+
+    <section class="card platforms">
+        <span class="plat-title" data-i18n="platforms">支持平台</span>
+        <div class="plat-list">
+            <span class="plat"><i class="dot win"></i>Windows</span>
+            <span class="plat"><i class="dot linux"></i>Linux</span>
+            <span class="plat"><i class="dot mac"></i>macOS</span>
+            <span class="plat"><i class="dot android"></i>Android</span>
+            <span class="plat"><i class="dot ios"></i>iOS</span>
+            <span class="plat"><i class="dot web"></i>x64 / arm64 / loongarch64</span>
+        </div>
+    </section>
+
+    <footer><span data-i18n="footer">StarServer 安装引导</span><span id="updateTime"></span></footer>
+</div>
+
+<script>
+const I18N = {
+    zh: {
+        brandSub: "分布式服务与运维平台",
+        lead: "节点管理、应用中心、配置中心、注册发现、链路监控与发布部署。节点与应用在这里统一接入。",
+        stNode: "在线节点",
+        stApp: "在线应用",
+        stCall: "今日调用",
+        stError: "今日错误",
+        onlineRate: "在线率",
+        vsYesterday: "较昨日",
+        today: "今日",
+        yesterday: "昨日",
+        stTotal: "总计",
+        trendTitle: "近 7 天调用趋势",
+        trendHint: "仅展示形状",
+        platforms: "支持平台",
+        console: "管理控制台",
+        modNode: "节点管理",
+        modConfig: "配置中心",
+        modReg: "注册发现",
+        modDeploy: "发布部署",
+        modTrace: "链路监控",
+        errorRate: "错误率",
+        uptime: "已稳定运行",
+        packagesHint: "StarAgent 客户端",
+        server: "服务端",
+        command: "一键安装",
+        copy: "复制",
+        copyCommand: "复制命令",
+        copied: "已复制到剪贴板",
+        autoPicked: "已按当前浏览器识别为",
+        archAuto: "架构由脚本自动检测",
+        packages: "安装包",
+        native: "原生 Agent",
+        nativeHint: "Go / Rust / C++ 轻量版本",
+        runtime: ".NET 运行时",
+        runtimeHint: "缺少运行时的机器先装这个",
+        items: "个安装包",
+        mirror: "公共镜像（服务端未维护安装包时兜底）",
+        mirrorHint: "6/8/10 为通用包，Linux 取 tar.gz、Windows 取 zip；只有 net45 限 Windows",
+        colOS: "平台", colArch: "架构", colRuntime: "运行时", colFile: "文件",
+        colSize: "大小", colAction: "下载",
+        download: "下载", empty: "该版本暂未发布安装包", emptyAgent: "该版本暂未发布安装包，可先用下方公共镜像", suggest: "推荐",
+        footer: "StarServer 安装引导",
+        note1t: "需要管理员权限",
+        note1: "脚本会安装 .NET 运行时与 StarAgent 系统服务，Linux 用 sudo、Windows 用管理员 PowerShell。",
+        note2t: "自动注册到本站",
+        note2: "安装时写入服务端地址，代理启动后会带上硬件信息自动注册，无需手工配置。",
+        note3t: "后续可在线升级",
+        note3: "完整版支持平台下发升级包，原生版本可通过引导安装切换到完整版。",
+    },
+    en: {
+        brandSub: "Distributed services & operations",
+        lead: "Node management, application center, config center, registry, tracing and release deployment. Nodes and applications register here.",
+        stNode: "Nodes online",
+        stApp: "Apps online",
+        stCall: "Calls today",
+        stError: "Errors today",
+        onlineRate: "online",
+        vsYesterday: "vs yesterday",
+        today: "today",
+        yesterday: "yesterday",
+        stTotal: "total",
+        trendTitle: "Calls in last 7 days",
+        trendHint: "Shape only",
+        platforms: "Platforms",
+        console: "Console",
+        modNode: "Nodes",
+        modConfig: "Config center",
+        modReg: "Registry",
+        modDeploy: "Deployment",
+        modTrace: "Tracing",
+        errorRate: "error rate",
+        uptime: "Uptime",
+        packagesHint: "StarAgent client",
+        server: "Server",
+        command: "One-line install",
+        copy: "Copy",
+        copyCommand: "Copy command",
+        copied: "Copied to clipboard",
+        autoPicked: "Detected from your browser:",
+        archAuto: "arch auto-detected by the script",
+        packages: "Packages",
+        native: "Native agents",
+        nativeHint: "Go / Rust / C++ builds",
+        runtime: ".NET runtime",
+        runtimeHint: "Install first when the runtime is missing",
+        items: "packages",
+        mirror: "Public mirror (fallback when nothing is published here)",
+        mirrorHint: "6/8/10 are portable packages: tar.gz for Linux, zip for Windows. Only net45 is Windows-only.",
+        colOS: "Platform", colArch: "Arch", colRuntime: "Runtime", colFile: "File",
+        colSize: "Size", colAction: "Download",
+        download: "Download", empty: "No package published for this version", emptyAgent: "No packages for this version yet — use the public mirror below", suggest: "Latest",
+        footer: "StarServer install guide",
+        note1t: "Administrator required",
+        note1: "The script installs the .NET runtime and the StarAgent service. Use sudo on Linux or an elevated PowerShell on Windows.",
+        note2t: "Registers automatically",
+        note2: "The server address is written during installation; the agent registers itself with hardware info on first start.",
+        note3t: "Upgradable later",
+        note3: "The full version supports server-driven upgrades; native builds can bootstrap into the full version.",
+    },
+};
+
+let lang = (navigator.language || "zh").toLowerCase().startsWith("zh") ? "zh" : "en";
+const reducedMotion = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+let manifest = null;
+let os = "linux";
+let detected = false;
+
+const $ = id => document.getElementById(id);
+const t = key => (I18N[lang] && I18N[lang][key]) || key;
+
+function applyLang() {
+    document.documentElement.lang = lang === "zh" ? "zh-CN" : "en";
+    document.querySelectorAll("[data-i18n]").forEach(el => { el.textContent = t(el.dataset.i18n); });
+    $("langBtn").textContent = lang === "zh" ? "English" : "中文";
+    renderAutoHint();
+    renderSummary();
+    render();
+}
+
+function abs(url) {
+    if (!url) return "";
+    if (/^https?:\/\//i.test(url)) return url;
+    const server = (manifest && manifest.server) || "";
+    return server.replace(/\/+$/, "") + "/" + String(url).replace(/^\/+/, "");
+}
+
+function sizeText(size) {
+    if (!size) return "-";
+    const units = ["B", "KB", "MB", "GB"];
+    let value = size, i = 0;
+    while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+    return value.toFixed(i === 0 ? 0 : 1) + " " + units[i];
+}
+
+function cell(text, className) {
+    const td = document.createElement("td");
+    td.textContent = text == null || text === "" ? "-" : text;
+    if (className) td.className = className;
+    return td;
+}
+
+function platformCell(pkg) {
+    const td = document.createElement("td");
+    const span = document.createElement("span");
+    const name = pkg.os && pkg.os !== "Any" ? pkg.os : "Any";
+    span.className = "pill" + (name === "Any" ? " grey" : "");
+    span.textContent = name;
+    td.appendChild(span);
+    return td;
+}
+
+function downloadCell(pkg) {
+    const td = document.createElement("td");
+    const a = document.createElement("a");
+    a.className = "dl";
+    a.href = abs(pkg.url);
+    a.textContent = t("download");
+    td.appendChild(a);
+    return td;
+}
+
+function row(pkg, withVersion) {
+    const tr = document.createElement("tr");
+    if (withVersion) tr.appendChild(cell(pkg.version, "mono"));
+    tr.appendChild(platformCell(pkg));
+    tr.appendChild(cell(pkg.arch));
+    // 运行时表已用版本列表头，不再显示运行时列
+    if (!withVersion) tr.appendChild(cell(pkg.runtime || "-", "mono"));
+    tr.appendChild(cell(pkg.fileName, "mono file"));
+    tr.appendChild(cell(sizeText(pkg.size), "num"));
+    tr.appendChild(downloadCell(pkg));
+    return tr;
+}
+
+function fill(tbodyId, emptyId, list, withVersion) {
+    const body = $(tbodyId);
+    body.innerHTML = "";
+    (list || []).forEach(pkg => body.appendChild(row(pkg, withVersion)));
+    if (emptyId) $(emptyId).hidden = (list || []).length > 0;
+}
+
+function renderTiles(list) {
+    const box = $("runtimeTiles");
+    box.innerHTML = "";
+    $("runtimeCount").textContent = (list || []).length + " " + t("items");
+    (list || []).forEach(pkg => {
+        const tile = document.createElement("div");
+        tile.className = "tile";
+
+        const head = document.createElement("div");
+        head.className = "v";
+        const ver = document.createElement("b");
+        ver.textContent = pkg.version || "-";
+        head.appendChild(ver);
+        if (pkg.size > 0) {
+            const badge = document.createElement("span");
+            badge.className = "pill grey";
+            badge.textContent = sizeText(pkg.size);
+            head.appendChild(badge);
+        }
+        tile.appendChild(head);
+
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        [pkg.os !== "Any" ? pkg.os : "Any", pkg.arch].forEach(text => {
+            const s = document.createElement("span");
+            s.className = "pill grey";
+            s.textContent = text;
+            meta.appendChild(s);
+        });
+        tile.appendChild(meta);
+
+        const fname = document.createElement("div");
+        fname.className = "fname";
+        fname.textContent = pkg.fileName || "-";
+        fname.title = pkg.fileName || "";
+        tile.appendChild(fname);
+
+        const foot = document.createElement("div");
+        foot.className = "foot";
+        const a = document.createElement("a");
+        a.className = "dl";
+        a.href = abs(pkg.url);
+        a.textContent = t("download");
+        foot.appendChild(a);
+        tile.appendChild(foot);
+
+        box.appendChild(tile);
+    });
+    $("runtimeEmpty").hidden = (list || []).length > 0;
+}
+
+function currentVersion() {
+    if (!manifest || !manifest.versions || manifest.versions.length === 0) return null;
+    const id = parseInt($("versionSel").value, 10);
+    return manifest.versions.find(e => e.id === id) || manifest.versions[0];
+}
+
+function renderVersions() {
+    const sel = $("versionSel");
+    sel.innerHTML = "";
+    const versions = (manifest && manifest.versions) || [];
+    if (versions.length === 0) {
+        const opt = document.createElement("option");
+        opt.value = "0";
+        opt.textContent = "-";
+        sel.appendChild(opt);
+        return;
+    }
+    versions.forEach((v, i) => {
+        const opt = document.createElement("option");
+        opt.value = v.id;
+        opt.textContent = v.version + (i === 0 ? " · " + t("suggest") : "");
+        sel.appendChild(opt);
+    });
+}
+
+function renderCommand() {
+    if (!manifest) return;
+    const server = (manifest.server || "").replace(/\/+$/, "");
+
+    document.querySelectorAll("#osTabs button").forEach(btn => {
+        btn.classList.toggle("on", btn.dataset.os === os);
+    });
+
+    // 平台由扩展名区分（.ps1/.sh），架构由目标机上的脚本自行识别，命令里无需带参数
+    if (os === "windows") {
+        const url = server + "/install.ps1";
+        $("command").textContent =
+            "powershell -NoProfile -ExecutionPolicy Bypass -Command \"iwr '" + url + "' -UseBasicParsing | iex\"";
+    } else {
+        const url = server + "/install.sh";
+        $("command").textContent = "curl -fsSL '" + url + "' | sudo bash";
+    }
+}
+
+function renderAutoHint() {
+    if (!detected) return;
+    const name = os === "windows" ? "Windows" : "Linux / macOS";
+    $("autoHint").textContent = t("autoPicked") + " " + name + " · " + t("archAuto");
+}
+
+/** 安装包是否属于当前平台页签 */
+function matchOS(pkg) {
+    const name = (pkg.os || "Any").toLowerCase();
+    if (name === "any") return true;
+    if (os === "windows") return name === "windows";
+
+    return name === "linux" || name === "linuxmusl" || name === "osx";
+}
+
+function render() {
+    if (!manifest) return;
+    $("server").textContent = manifest.server || "-";
+    $("updateTime").textContent = manifest.updateTime ? " · " + manifest.updateTime : "";
+    renderVersions();
+
+    const ver = currentVersion();
+    const packages = (ver && ver.packages) || [];
+    const agent = packages.filter(e => (!e.kind || e.kind === "agent") && matchOS(e));
+    const native = packages.filter(e => e.kind === "native" && matchOS(e));
+
+    fill("agentTable", "agentEmpty", agent, false);
+
+    $("nativeCard").hidden = native.length === 0;
+    if (native.length > 0) fill("nativeTable", null, native, false);
+
+    renderTiles((manifest.runtimes || []).filter(matchOS));
+    fill("mirrorTable", null, (manifest.mirror || []).filter(matchOS), false);
+
+    // 当前版本没有安装包时，把公共镜像展开放在眼前，避免用户在这里卡住
+    $("mirrorBox").open = agent.length === 0;
+
+    // 服务端未维护任何发布版本时，直接展开公共镜像，避免用户面对空表
+    const mirrorBox = document.querySelector("details.mirror");
+    if (mirrorBox) mirrorBox.open = (manifest.versions || []).length === 0;
+
+    renderCommand();
+}
+
+async function detectPlatform() {
+    if (/Windows/i.test(navigator.userAgent || "")) os = "windows";
+    else os = "linux";
+
+    detected = true;
+    renderAutoHint();
+    renderCommand();
+}
+
+async function load() {
+    const resp = await fetch("install?format=json", { headers: { "Accept": "application/json" } });
+    manifest = await resp.json();
+    render();
+}
+
+function fmt(value) {
+    if (value == null) return "-";
+    return Number(value).toLocaleString(lang === "zh" ? "zh-CN" : "en-US");
+}
+
+function uptimeText(seconds) {
+    if (!seconds || seconds < 0) return "-";
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (lang === "zh") {
+        if (days > 0) return days + " 天 " + hours + " 小时";
+        if (hours > 0) return hours + " 小时 " + minutes + " 分";
+        return minutes + " 分钟";
+    }
+    if (days > 0) return days + "d " + hours + "h";
+    if (hours > 0) return hours + "h " + minutes + "m";
+    return minutes + "m";
+}
+
+let summary = null;
+
+/** 量级化展示：只保留数量级，避免泄露精确运营数据 */
+function magnitude(value) {
+    value = Math.max(0, Math.round(value || 0));
+    if (!value) return "0";
+    if (value < 1000) return fmt(value);
+    if (value < 10000) return fmt(Math.floor(value / 100) * 100) + "+";
+
+    if (lang === "zh") {
+        if (value >= 100000000) return fmt(Math.floor(value / 100000000)) + " 亿+";
+        return fmt(Math.floor(value / 10000)) + " 万+";
+    }
+    if (value >= 1000000000) return Math.floor(value / 1000000000) + "B+";
+    if (value >= 1000000) return Math.floor(value / 1000000) + "M+";
+    return Math.floor(value / 1000) + "K+";
+}
+
+function percent(value) {
+    return ((value || 0) * 100).toFixed(2) + "%";
+}
+
+/** 数字滚动动画。formatter 负责把中间值格式化为最终展示文本 */
+function animateNumber(el, value, formatter, duration) {
+    const to = Number(value) || 0;
+    if (reducedMotion) { el.textContent = formatter(to); return; }
+
+    const span = duration || 700;
+    const start = performance.now();
+    function tick(now) {
+        const p = Math.min(1, (now - start) / span);
+        const eased = 1 - Math.pow(1 - p, 3);
+        el.textContent = formatter(Math.round(to * eased));
+        if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+}
+
+/** 绘制近7天趋势曲线。数据已归一化为 0~100，不包含绝对量 */
+function renderTrend(values) {
+    const block = $("trendBlock");
+    if (!values || values.length < 2) { block.hidden = true; return; }
+    block.hidden = false;
+
+    const w = 300, h = 64, pad = 4;
+    const step = (w - pad * 2) / (values.length - 1);
+    const pts = values.map((v, i) => [pad + i * step, h - pad - (Math.max(0, Math.min(100, v)) / 100) * (h - pad * 2)]);
+    const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+    const last = pts[pts.length - 1];
+    const area = line + " L" + last[0].toFixed(1) + " " + (h - pad) + " L" + pts[0][0].toFixed(1) + " " + (h - pad) + " Z";
+
+    $("sparkLine").setAttribute("d", line);
+    $("sparkArea").setAttribute("d", area);
+    $("sparkDot").setAttribute("cx", last[0].toFixed(1));
+    $("sparkDot").setAttribute("cy", last[1].toFixed(1));
+
+    const svgLine = $("sparkLine");
+    const dot = $("sparkDot");
+    if (reducedMotion) { svgLine.classList.add("on"); dot.classList.add("on"); return; }
+
+    svgLine.classList.remove("on");
+    dot.classList.remove("on");
+    setTimeout(() => { svgLine.classList.add("on"); dot.classList.add("on"); }, 40);
+}
+
+function renderSummary() {
+    if (!summary) return;
+
+    // 服务端按配置决定展示模式：hidden 不返回统计，页面同时隐藏统计块
+    const mode = summary.mode || "exact";
+    const showStats = mode !== "hidden" && (summary.nodeTotal > 0 || summary.appTotal > 0 || summary.todayCall > 0);
+    $("statsBlock").hidden = !showStats;
+
+    const show = mode === "exact" ? fmt : magnitude;
+    if (showStats) {
+        animateNumber($("stNodeOnline"), summary.nodeOnline, show);
+        $("stNodeSub").textContent = summary.nodeTotal > 0 ? t("stTotal") + " " + show(summary.nodeTotal) : "-";
+        animateNumber($("stAppOnline"), summary.appOnline, show);
+        $("stAppSub").textContent = summary.appTotal > 0 ? t("stTotal") + " " + show(summary.appTotal) : "-";
+        animateNumber($("stTodayCall"), summary.todayCall, show);
+        // 量级化后今日与昨日可能差好几个数量级，此时百分比没有意义，改为直接给昨日量级
+        const today = summary.todayCall || 0;
+        const yst = summary.yesterdayCall || 0;
+        const ratio = yst > 0 ? today / yst : 0;
+        $("stCallSub").textContent = today > 0 && yst > 0 && ratio >= 0.1 && ratio <= 10
+            ? t("vsYesterday") + " " + (((today - yst) / yst * 100).toFixed(1)) + "%"
+            : (yst > 0 ? t("yesterday") + " " + show(yst) : t("today"));
+        animateNumber($("stTodayError"), summary.todayError, show);
+        $("stErrorSub").textContent = t("errorRate") + " " + percent(summary.errorRate);
+    }
+    renderTrend(showStats ? summary.trend : null);
+
+    $("versionChip").textContent = summary.version ? "v" + summary.version : "-";
+    $("uptimeChip").textContent = summary.uptime > 0 ? t("uptime") + " " + uptimeText(summary.uptime) : "-";
+    if (summary.server && (!manifest || !manifest.server)) $("server").textContent = summary.server;
+
+    // 统计卡跳转到控制台对应列表，未配置控制台地址时保持纯展示
+    document.querySelectorAll(".stat").forEach(el => {
+        const path = el.dataset.path;
+        if (summary.webUrl && path) {
+            el.href = summary.webUrl.replace(/\/+$/, "") + path;
+            el.target = "_blank";
+            el.rel = "noopener";
+        } else {
+            el.removeAttribute("href");
+        }
+    });
+
+    if (summary.webUrl) {
+        const btn = $("consoleBtn");
+        btn.href = summary.webUrl;
+        btn.textContent = t("console") + " →";
+        btn.hidden = false;
+    }
+}
+
+async function loadSummary() {
+    try {
+        const resp = await fetch("home/summary", { headers: { "Accept": "application/json" } });
+        summary = await resp.json();
+        renderSummary();
+    } catch { /* 概览失败不影响安装引导 */ }
+}
+
+document.querySelectorAll("#osTabs button").forEach(btn => {
+    btn.addEventListener("click", () => {
+        os = btn.dataset.os;
+        detected = false;
+        $("autoHint").textContent = "";
+        render();
+    });
+});
+$("langBtn").addEventListener("click", () => { lang = lang === "zh" ? "en" : "zh"; applyLang(); });
+$("versionSel").addEventListener("change", render);
+
+async function copyText(text) {
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch {
+        const area = document.createElement("textarea");
+        area.value = text;
+        area.style.position = "fixed";
+        area.style.opacity = "0";
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        document.body.removeChild(area);
+    }
+}
+
+let tipTimer = 0;
+function flashCopy(id, text) {
+    copyText(text).then(() => {
+        const tip = $(id);
+        const old = tip.textContent;
+        tip.textContent = t("copied");
+        clearTimeout(tipTimer);
+        tipTimer = setTimeout(() => { tip.textContent = old && id === "copyTip" ? "" : old; }, 1600);
+    });
+}
+
+$("copyBtn").addEventListener("click", () => flashCopy("copyTip", $("command").textContent));
+$("copyServer").addEventListener("click", () => {
+    const server = (manifest && manifest.server) || $("server").textContent;
+    copyText(server);
+});
+
+applyLang();
+loadSummary();
+detectPlatform().then(load).catch(err => { $("command").textContent = String(err); });
+</script>
+</body>
+</html>

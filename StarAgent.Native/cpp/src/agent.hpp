@@ -6,6 +6,7 @@
 #include "events.hpp"
 #include "executor.hpp"
 #include "http_client.hpp"
+#include "local_api.hpp"
 #include "logging.hpp"
 #include "metrics.hpp"
 #include "platform.hpp"
@@ -14,6 +15,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -43,8 +45,10 @@ public:
 
     int Run();
     int Once();
+    // 登录后向服务端取引导安装清单，安装 .NET 运行时与完整版 StarAgent。
+    // 返回 0 表示安装完成，非 0 为失败。
+    int Bootstrap();
     void RequestStop();
-
 private:
     enum class SessionResult
     {
@@ -54,6 +58,8 @@ private:
 
     SessionResult RunSession(Backoff& backoff);
     void NotifyLoop(std::atomic<bool>& session_stopping);
+    void QualityLoop(std::atomic<bool>& session_stopping);
+    void RefreshQuality(const std::function<bool()>& cancelled);
     void Shutdown();
     void Login();
     PingResponse Ping();
@@ -62,7 +68,11 @@ private:
     void SendReply(const CommandReplyModel& reply);
     void FlushEvents();
     void CheckUpgrade();
+    // 取引导安装清单并执行安装，返回空串表示成功
+    std::string InstallBootstrap();
     void Enqueue(const std::string& type, const std::string& name, const std::string& remark);
+    std::string BuildLocalInfo();
+    bool TryUpgrade(const UpgradeInfo& info);
     NodeInfo BuildNodeInfo();
     PingInfo BuildPingInfo();
     platform::NetworkInfo NetworkSnapshot(bool force);
@@ -85,6 +95,7 @@ private:
     EventQueue events_;
     std::unique_ptr<Executor> executor_;
     WsClient ws_client_;
+    LocalApiServer local_api_;
 
     platform::HardwareInfo hardware_;
     platform::SystemInfo system_;
@@ -108,6 +119,17 @@ private:
 
     std::mutex upgrade_mutex_;
     std::int64_t last_upgrade_ms_ = 0;
+
+    // 网络质量：后台线程定期探测网关/DNS/服务端，心跳复用结果
+    struct QualityState
+    {
+        platform::ProbeResult Gateway;
+        platform::ProbeResult Dns;
+        platform::ProbeResult Server;
+        std::int64_t AtMs = 0;
+    };
+    std::mutex quality_mutex_;
+    QualityState quality_;
 
     std::vector<std::string> restart_arguments_;
 };

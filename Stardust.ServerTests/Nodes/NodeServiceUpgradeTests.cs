@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using NewLife;
 using NewLife.Remoting.Models;
 using Stardust.Data.Nodes;
 using Stardust.Models;
@@ -186,4 +187,232 @@ public class NodeServiceUpgradeTests
         Assert.Equal(scope.Release.Version, info.Version);
         Assert.Equal(pkg.Source, info.Source);
     }
+
+    /// <summary>非强制升级下发一次即视为完成，同一份安装包不再重复下发。</summary>
+    [Fact]
+    [Trait("Category", "Nodes")]
+    public void ForceFalse_DispatchedOnce()
+    {
+        using var isolation = new UpgradeIsolation();
+        using var scope = new UpgradeScope("StarAgent", "StarAgent", "8.0.6");
+        scope.AddPackage("8");
+
+        var svc = CreateService();
+        var info = svc.Upgrade(NewContext(scope.Node), "Release");
+
+        Assert.NotNull(info);
+        Assert.Equal(1, scope.Node.UpgradeAttempts);
+        Assert.False(scope.Node.LastUpgradeKey.IsNullOrEmpty());
+
+        Assert.Null(svc.Upgrade(NewContext(scope.Node), "Release"));
+    }
+
+    /// <summary>强制升级在节点确认前按退避间隔等待，退避到期后重新下发并累加次数。</summary>
+    [Fact]
+    [Trait("Category", "Nodes")]
+    public void ForceTrue_RetriesAfterBackoff()
+    {
+        using var isolation = new UpgradeIsolation();
+        using var scope = new UpgradeScope("StarAgent", "StarAgent", "8.0.6");
+        scope.AddPackage("8");
+        scope.Release.Force = true;
+        scope.Release.Update();
+
+        var svc = CreateService();
+        Assert.NotNull(svc.Upgrade(NewContext(scope.Node), "Release"));
+
+        // 退避未到期，不重复下发
+        Assert.Null(svc.Upgrade(NewContext(scope.Node), "Release"));
+
+        // 回拨下发时间，模拟退避到期
+        scope.Node.LastUpgradeTime = DateTime.Now.AddMinutes(-20);
+        scope.Node.Update();
+
+        var info = svc.Upgrade(NewContext(scope.Node), "Release");
+        Assert.NotNull(info);
+        Assert.Equal(2, scope.Node.UpgradeAttempts);
+    }
+
+    /// <summary>同一份安装包连续下发达到上限后停止自动重试，等待人工介入。</summary>
+    [Fact]
+    [Trait("Category", "Nodes")]
+    public void SamePackage_StopsAtMaxAttempts()
+    {
+        using var isolation = new UpgradeIsolation();
+        using var scope = new UpgradeScope("StarAgent", "StarAgent", "8.0.6");
+        scope.AddPackage("8");
+        scope.Release.Force = true;
+        scope.Release.Update();
+
+        var svc = CreateService();
+        Assert.NotNull(svc.Upgrade(NewContext(scope.Node), "Release"));
+
+        scope.Node.UpgradeAttempts = Node.MaxUpgradeAttempts;
+        scope.Node.LastUpgradeTime = DateTime.Now.AddDays(-1);
+        scope.Node.Update();
+
+        Assert.Null(svc.Upgrade(NewContext(scope.Node), "Release"));
+    }
+
+    /// <summary>同版本号重新打包后安装包哈希变化，视为新包并允许再次下发。</summary>
+    [Fact]
+    [Trait("Category", "Nodes")]
+    public void SameVersion_NewPackage_Dispatched()
+    {
+        using var isolation = new UpgradeIsolation();
+        using var scope = new UpgradeScope("StarAgent", "StarAgent", "8.0.6");
+        var pkg = scope.AddPackage("8");
+
+        var svc = CreateService();
+        Assert.NotNull(svc.Upgrade(NewContext(scope.Node), "Release"));
+        Assert.Null(svc.Upgrade(NewContext(scope.Node), "Release"));
+
+        // 版本号不变，仅替换安装包内容
+        pkg.FileHash = "fedcba9876543210fedcba9876543210";
+        pkg.Update();
+
+        Assert.NotNull(svc.Upgrade(NewContext(scope.Node), "Release"));
+    }
+
+    /// <summary>管理员清空最后版本后立即重新下发，无需改动其它字段。</summary>
+    [Fact]
+    [Trait("Category", "Nodes")]
+    public void ClearLastVersion_DispatchesAgain()
+    {
+        using var isolation = new UpgradeIsolation();
+        using var scope = new UpgradeScope("StarAgent", "StarAgent", "8.0.6");
+        scope.AddPackage("8");
+
+        var svc = CreateService();
+        Assert.NotNull(svc.Upgrade(NewContext(scope.Node), "Release"));
+        Assert.Null(svc.Upgrade(NewContext(scope.Node), "Release"));
+
+        scope.Node.LastVersion = null;
+        scope.Node.Update();
+
+        Assert.NotNull(svc.Upgrade(NewContext(scope.Node), "Release"));
+    }
+
+    /// <summary>代理上报升级失败后解除去重，下一轮检查重新下发。</summary>
+    [Fact]
+    [Trait("Category", "Nodes")]
+    public void UpgradeErrorEvent_ReleasesThrottle()
+    {
+        using var isolation = new UpgradeIsolation();
+        using var scope = new UpgradeScope("StarAgent", "StarAgent", "8.0.6");
+        scope.AddPackage("8");
+
+        var svc = CreateService();
+        var ctx = NewContext(scope.Node);
+        Assert.NotNull(svc.Upgrade(ctx, "Release"));
+        Assert.Null(svc.Upgrade(ctx, "Release"));
+
+        svc.PostEvents(ctx, [new EventModel { Name = "Upgrade", Type = "error", Remark = "Update failed" }]);
+
+        Assert.NotNull(svc.Upgrade(ctx, "Release"));
+    }
+
+    /// <summary>手工指定版本时绕过去重，即使同一份安装包已下发过也会重新下发。</summary>
+    [Fact]
+    [Trait("Category", "Nodes")]
+    public void SpecifiedVersion_BypassesThrottle()
+    {
+        using var isolation = new UpgradeIsolation();
+        using var scope = new UpgradeScope("StarAgent", "StarAgent", "8.0.6");
+        scope.AddPackage("8");
+
+        var svc = CreateService();
+        var ctx = NewContext(scope.Node);
+        Assert.NotNull(svc.Upgrade(ctx, "Release"));
+        Assert.Null(svc.Upgrade(ctx, "Release"));
+
+        var info = svc.Upgrade(ctx, "Release", scope.Release.Version);
+        Assert.NotNull(info);
+        Assert.Equal(scope.Release.Version, info.Version);
+    }
+
+    /// <summary>代理上报升级成功后停止重试，即使退避到期也不再下发。</summary>
+    [Fact]
+    [Trait("Category", "Nodes")]
+    public void UpgradeSuccessEvent_StopsRetry()
+    {
+        using var isolation = new UpgradeIsolation();
+        using var scope = new UpgradeScope("StarAgent", "StarAgent", "8.0.6");
+        scope.AddPackage("8");
+        scope.Release.Force = true;
+        scope.Release.Update();
+
+        var svc = CreateService();
+        var ctx = NewContext(scope.Node);
+        Assert.NotNull(svc.Upgrade(ctx, "Release"));
+
+        svc.PostEvents(ctx, [new EventModel { Name = "Upgrade", Type = "success", Remark = "Upgrade finished" }]);
+
+        scope.Node.LastUpgradeTime = DateTime.Now.AddDays(-1);
+        scope.Node.Update();
+
+        Assert.Null(svc.Upgrade(ctx, "Release"));
+    }
+
+    /// <summary>升级策略版本号是标签（如 agent60-1106）时，节点上报的是程序集文件版本（如 3.7.2026.1106）。
+    /// 两者写法不同也必须识别升级生效，否则已经升级成功的节点会被反复重推直到次数用尽。</summary>
+    [Fact]
+    [Trait("Category", "Nodes")]
+    public void StrategyLabelVersion_NodeUpgraded_StopsRetry()
+    {
+        using var isolation = new UpgradeIsolation();
+
+        var nv = new NodeVersion
+        {
+            Version = "agent60-" + Guid.NewGuid().ToString("n")[..4],
+            ProductCode = "StarAgent",
+            Enable = true,
+            Force = true,
+            Channel = NodeChannels.Release,
+            Strategy = "runtime=8.*;version<=3.7.2026.1106",
+            Source = "http://127.0.0.1/files/agent.zip",
+            Size = 1024,
+            FileHash = "0123456789abcdef0123456789abcdef",
+        };
+        nv.Insert();
+
+        var node = new Node
+        {
+            Code = "test-nvlabel-" + Guid.NewGuid().ToString("n")[..8],
+            Name = "test-nvlabel",
+            ProductCode = "StarAgent",
+            Runtime = "8.0.6",
+            OSKind = OSKinds.Ubuntu,
+            Architecture = "Arm64",
+            Version = "3.7.2026.0728",
+            Enable = true,
+        };
+        node.Insert();
+
+        try
+        {
+            var svc = CreateService();
+            var ctx = NewContext(node);
+
+            var info = svc.Upgrade(ctx, "Release");
+            Assert.NotNull(info);
+            Assert.Equal(nv.Version, node.LastVersion);
+
+            // 模拟代理升级完成重启：上报的是程序集文件版本，与策略标签写法不同
+            node.Fill(new NodeInfo { Version = "3.7.2026.1106" });
+            node.Update();
+
+            Assert.Equal(Node.MaxUpgradeAttempts, node.UpgradeAttempts);
+
+            // 升级已经生效，不得继续重推
+            Assert.Null(svc.Upgrade(ctx, "Release"));
+        }
+        finally
+        {
+            NodeHistory.Delete(NodeHistory._.NodeID == node.ID);
+            node.Delete();
+            nv.Delete();
+        }
+    }
 }
+

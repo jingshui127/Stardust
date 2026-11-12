@@ -111,9 +111,54 @@ public partial class AlarmRecord : Entity<AlarmRecord>
     #endregion
 
     #region 业务操作
+    /// <summary>确认报警。记录确认人与时间，不改变报警状态</summary>
+    /// <param name="user">确认人</param>
+    /// <returns>是否保存成功</returns>
+    public Boolean Ack(String user)
+    {
+        AckTime = DateTime.Now;
+        AckUser = user;
+
+        return Update() > 0;
+    }
+
+    /// <summary>静默报警。在截止时间前不发送外部通知</summary>
+    /// <param name="hours">静默小时数</param>
+    /// <returns>是否保存成功</returns>
+    public Boolean Silence(Int32 hours)
+    {
+        if (hours <= 0) hours = 24;
+
+        SilenceTime = DateTime.Now.AddHours(hours);
+
+        return Update() > 0;
+    }
+
+    /// <summary>是否已确认</summary>
+    public Boolean IsAcked => AckTime.Year > 2000;
+
+    /// <summary>是否处于静默期</summary>
+    public Boolean IsSilenced => SilenceTime > DateTime.Now;
+
+    /// <summary>是否允许发送通知。仅报警中且未静默时发送</summary>
+    public Boolean CanNotify => Status == AlarmStatuses.Alarming && !IsSilenced;
+
     /// <summary>删除指定日期之前的数据</summary>
     /// <param name="date"></param>
     /// <returns></returns>
     public static Int32 DeleteBefore(DateTime date) => Delete(_.Id < Meta.Factory.Snow.GetId(date));
+
+    /// <summary>按告警类别分组统计指定时间段的告警数。看板大屏告警分布使用</summary>
+    /// <param name="start">开始时间</param>
+    /// <param name="end">结束时间</param>
+    /// <returns>仅填充 Category/Times/Id 的列表</returns>
+    public static IList<AlarmRecord> SearchGroupCategory(DateTime start, DateTime end)
+    {
+        var selects = _.Times.Sum() & _.Id.Count() & _.Category;
+        // 主键Id为雪花时间片，走主键索引；StartTime 没有索引，直接按它过滤会全表扫描
+        var where = new WhereExpression() & _.Id.Between(start, end, Meta.Factory.Snow);
+
+        return FindAll(where.GroupBy(_.Category), null, selects);
+    }
     #endregion
 }

@@ -1,4 +1,3 @@
-using System.Globalization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using NewLife;
@@ -21,7 +20,7 @@ public class LanguageMiddleware(RequestDelegate next)
         await next(context);
     }
 
-    /// <summary>取请求语言。优先查询串 lang，其次 Cookie，最后 Accept-Language</summary>
+    /// <summary>取请求语言。优先查询串 lang，其次 Cookie 与 Accept-Language，最后回退平台设置的默认语言</summary>
     /// <param name="context">HTTP上下文</param>
     /// <returns>语言名称；未指定时返回 null</returns>
     public static String? GetLanguage(HttpContext context)
@@ -29,6 +28,7 @@ public class LanguageMiddleware(RequestDelegate next)
         var name = context.Request.Query["lang"].FirstOrDefault();
         if (name.IsNullOrEmpty()) name = context.Request.Cookies[".AspNet.Culture"];
         if (name.IsNullOrEmpty()) name = context.Request.Headers.AcceptLanguage.FirstOrDefault();
+        if (name.IsNullOrEmpty()) name = StarServerSetting.Current.DefaultLanguage;
 
         return name;
     }
@@ -37,23 +37,29 @@ public class LanguageMiddleware(RequestDelegate next)
 /// <summary>星尘多语言宿主扩展</summary>
 public static class StardustLocalizationExtensions
 {
-    /// <summary>启用多语言。配置了固定语言时全进程生效，否则按请求语言识别</summary>
+    /// <summary>启用多语言。核心配置固定语言时全进程生效，否则按请求语言识别</summary>
     /// <param name="app">应用构建器</param>
     /// <returns>应用构建器</returns>
     /// <remarks>
-    /// 请求语言识别期间，日志与配置文件注释固定为宿主语言，避免同一日志文件随请求语言混杂。
+    /// 界面语言统一由核心库基础配置 <c>Core.config</c> 的 <c>Language</c> 决定，星尘不再单独提供配置项。
+    /// <c>DefaultLanguage</c> 作为请求无受支持语言时的界面兜底，并作为日志、配置注释与登录/心跳下发的平台默认语言。
+    /// 平台设置 <c>StarServerSetting.DefaultLanguage</c> 非空时优先作为请求兜底并下发给客户端，为空时回退这里的核心配置语言。
+    /// 请求语言识别期间，日志与配置文件注释固定为配置语言或宿主启动语言，避免同一日志文件随请求语言混杂。
     /// 词表由各组件编译期 <c>Locales/*.yml</c> 生成，英文为源文与兜底。
     /// </remarks>
     public static IApplicationBuilder UseStardustLocalization(this IApplicationBuilder app)
     {
-        var language = StarServerSetting.Current?.Language;
-        if (!language.IsNullOrWhiteSpace() && StarLocalization.UseLanguage(language) != null) return app;
+        // 应用核心配置的界面与默认语言（环境变量优先），确保 DefaultLanguage 在对外服务前生效
+        NewLife.Setting.Current.ApplyLanguage();
+
+        // 核心配置已固定语言时，全进程直接生效，不再按请求识别
+        if (Localization.ForcedLanguage != null) return app;
 
         // 界面语言跟随请求，由中间件写入 CurrentUICulture
         Localization.Culture = null;
 
-        // 日志与配置注释使用宿主语言
-        Localization.LogCulture = CultureInfo.CurrentUICulture;
+        // 日志与配置注释已由核心库按 Language/DefaultLanguage 固定，未配置时回退到宿主启动语言。
+        // 这里不再覆盖 LogCulture，否则平台默认语言（随登录/心跳下发）会被宿主语言冲掉。
 
         return app.UseMiddleware<LanguageMiddleware>();
     }

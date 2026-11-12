@@ -62,7 +62,7 @@
         <Column Name="RepoPassword" DataType="String" Length="200" Description="仓库密码。HTTPS 克隆时的密码，AES 加密存储（密钥派生自 TokenSecret），回显为 5 个 *" Category="编译参数" />
         <Column Name="Branch" DataType="String" DefaultValue="master" Description="分支。默认main" Category="编译参数" />
         <Column Name="ProjectPath" DataType="String" Description="项目路径。需要编译的项目路径，相对于代码库根目录" Category="编译参数" />
-        <Column Name="ProjectKind" DataType="Int32" DefaultValue="1" Description="项目类型。默认dotnet" Type="Stardust.Models.ProjectKinds" Category="编译参数" />
+        <Column Name="ProjectKind" DataType="Int32" DefaultValue="1" Description="项目类型。默认dotnet。当选择自定义时，项目路径设置所要运行的bash脚本位置，执行脚本完成构建" Type="Stardust.Models.ProjectKinds" Category="编译参数" />
         <Column Name="BuildArgs" DataType="String" Length="200" Description="编译参数。编译项目时所需参数" Category="编译参数" />
         <Column Name="PackageFilters" DataType="String" Description="打包过滤器。需要打包哪些文件，支持通配符，多项分号隔开" Category="编译参数" />
         <Column Name="FileName" DataType="String" Description="文件。应用启动文件，可直接使用zip包" Category="发布参数" />
@@ -226,6 +226,7 @@
         <Column Name="Source" DataType="String" Length="500" Description="来源。用于远程抓取的附件来源地址，本地文件不存在时自动依次抓取" />
         <Column Name="Downloads" DataType="Int32" Description="下载次数" />
         <Column Name="LastDownload" DataType="DateTime" Description="最后下载。最后一次下载的时间" />
+        <Column Name="Storage" DataType="String" Length="50" Description="存储类型。Local本地磁盘，Oss阿里云，Cos腾讯云，Qiniu七牛，EasyIO，默认Local" />
         <Column Name="TraceId" DataType="String" Description="追踪。链路追踪，用于APM性能追踪定位，还原该事件的调用链" Category="扩展" />
         <Column Name="CreateUser" DataType="String" Description="创建者" Category="扩展" />
         <Column Name="CreateUserID" DataType="Int32" Description="创建用户" Category="扩展" />

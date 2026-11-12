@@ -142,6 +142,53 @@ MetricsSnapshot MetricsCollector::Collect()
 
     try
     {
+        const auto tcp = platform::TcpStates();
+        snapshot.TcpConnections = tcp.Established;
+        snapshot.TcpTimeWait = tcp.TimeWait;
+        snapshot.TcpCloseWait = tcp.CloseWait;
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+        const auto value = platform::Temperature();
+        if (value > 0) snapshot.Temperature = value;
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+        const auto value = platform::BatteryPercent();
+        if (value > 0) snapshot.Battery = value;
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+        snapshot.Signal = platform::WirelessSignal();
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
+        const auto io = platform::DiskIo();
+        snapshot.DiskIops = io.Iops;
+        snapshot.DiskActivePercent = io.ActivePercent;
+    }
+    catch (...)
+    {
+    }
+
+    try
+    {
         snapshot.Uptime = platform::UptimeSeconds();
     }
     catch (...)

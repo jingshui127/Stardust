@@ -26,7 +26,7 @@ public class AppPipelineController : EntityController<AppPipeline>
         // 列表字段：去掉敏感字段
         ListFields.RemoveField("Id", "Token", "Secret", "DeployNodeIds", "TraceId");
         ListFields.RemoveCreateField().RemoveRemarkField();
-        ListFields.TraceUrl("TraceId");
+        ListFields.LocalizedTraceUrl("TraceId");
 
         // 表单字段：Token/Secret/TraceId 不展示，新建时后台自动生成
         AddFormFields.RemoveField("Token", "Secret", "TraceId");
@@ -91,8 +91,9 @@ public class AppPipelineController : EntityController<AppPipeline>
         var entity = AppPipeline.FindById(id);
         if (entity == null) return Json(500, L.T("Pipeline does not exist."));
 
-        var serviceAddress = StarSetting.Current.ServiceAddress?.Split(",").FirstOrDefault(e => e.StartsWithIgnoreCase("http"));
-        var url = $"{serviceAddress}/Pipeline/Webhook?token={entity.Token}";
+        // webhook 入口位于 Deployment 区域，路由为 /Deployment/Pipeline/Webhook，此处必须带上区域前缀
+        var serviceAddress = StarSetting.Current.ServiceAddress?.Split(",").FirstOrDefault(e => e.StartsWithIgnoreCase("http"))?.TrimEnd('/');
+        var url = $"{serviceAddress}/Deployment/Pipeline/Webhook?token={entity.Token}";
 
         return Json(0, "ok", url);
     }

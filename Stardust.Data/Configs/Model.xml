@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <EntityModel xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:schemaLocation="https://newlifex.com https://newlifex.com/Model202509.xsd" Document="https://newlifex.com/xcode/model" ModelVersion="2.0.2026.130" xmlns="https://newlifex.com/Model202509.xsd">
   <Option>
     <!--类名模板。其中{name}替换为Table.Name，如{name}Model/I{name}Dto等-->
@@ -93,20 +93,6 @@
         <Column Name="UpdateIP" DataType="String" Description="更新地址" Category="扩展" />
         <Column Name="Remark" DataType="String" Length="500" Description="备注" Category="扩展" />
       </Columns>
-    </Table>
-    <Table Name="AppQuote" Description="应用依赖。应用可以引用依赖另一个应用">
-      <Columns>
-        <Column Name="Id" DataType="Int32" Identity="True" PrimaryKey="True" Description="编号" />
-        <Column Name="AppId" DataType="Int32" Description="应用。原始应用，该应用依赖别人" />
-        <Column Name="TargetAppId" DataType="Int32" Description="目标应用。被原始应用依赖的应用" />
-        <Column Name="CreateUserID" DataType="Int32" Description="创建者" Category="扩展" />
-        <Column Name="CreateTime" DataType="DateTime" Description="创建时间" Category="扩展" />
-        <Column Name="CreateIP" DataType="String" Description="创建地址" Category="扩展" />
-      </Columns>
-      <Indexes>
-        <Index Columns="AppId" />
-        <Index Columns="TargetAppId" />
-      </Indexes>
     </Table>
     <Table Name="ConfigData" Description="配置数据。配置名值对，发布后才能生效，支持多作用域划分生产和开发测试环境">
       <Columns>

@@ -47,8 +47,8 @@ public class NodeOnlineService(IServiceProvider serviceProvider, StarServerSetti
                     var node = online?.Node;
                     if (node != null)
                     {
-                        var msg = L.T("[{0}/{1}] logged in at {2}, last active at {3}", node, online?.SessionID, online.CreateTime, online.UpdateTime);
-                        node.WriteHistory(L.T("Timed out offline"), true, msg, online.CreateIP);
+                        var msg = L.TLog("[{0}/{1}] logged in at {2}, last active at {3}", node, online?.SessionID, online.CreateTime, online.UpdateTime);
+                        node.WriteHistory(HistoryAction.TimedOutOffline, true, msg, online.CreateIP);
 
                         // 结算在线时长统一由 RemoveOnline 负责
                         _nodeService.RemoveOnline(new DeviceContext { Device = node, Online = online });
@@ -58,10 +58,18 @@ public class NodeOnlineService(IServiceProvider serviceProvider, StarServerSetti
                 }
             }
         }
+
+        // 清理已过期但仍未执行的命令。离线节点无人取走命令，记录会长期停留在“就绪”
+        NodeCommand.CancelExpired(DateTime.Now);
     }
 
+    /// <summary>检查节点离线并发送告警。未开启离线告警或未配置Webhook时直接跳过</summary>
+    /// <param name="node">节点。为空时直接返回</param>
+    /// <param name="reason">离线原因，写入告警内容</param>
     public static void CheckOffline(Node node, String reason)
     {
+        if (node == null) return;
+
         // 下线告警
         if (node.AlarmOnOffline)
         {

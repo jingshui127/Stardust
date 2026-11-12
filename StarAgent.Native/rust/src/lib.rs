@@ -4,6 +4,7 @@
 
 pub mod agent;
 pub mod app;
+pub mod bootstrap;
 pub mod client;
 pub mod command;
 pub mod config;
@@ -13,7 +14,6 @@ pub mod logging;
 pub mod metrics;
 pub mod notify;
 pub mod protocol;
-pub mod service;
 
 use chrono::{DateTime, Utc};
 

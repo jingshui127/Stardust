@@ -5,6 +5,7 @@ using NewLife.Cube;
 using NewLife.Cube.ViewModels;
 using NewLife.Data;
 using NewLife.Web;
+using Stardust.Data;
 using Stardust.Data.Nodes;
 using Stardust.Models;
 using Stardust.Dns;
@@ -17,6 +18,7 @@ using static Stardust.Data.Nodes.Node;
 
 namespace Stardust.Web.Areas.Nodes.Controllers;
 
+/// <summary>节点管理。所有被监控的节点</summary>
 [Menu(90)]
 [NodesArea]
 public class NodeController : NodesEntityController<Node>
@@ -112,7 +114,7 @@ public class NodeController : NodesEntityController<Node>
             var old = Node.FindByID(entity.ID);
             if (old != null && old.Domains != entity.Domains)
             {
-                entity.WriteHistory(L.T("Domain changed"), true, L.T("Domains changed: {0} -> {1}", old.Domains, entity.Domains), ManageProvider.UserHost);
+                entity.WriteHistory(HistoryAction.DomainChanged, true, L.TLog("Domains changed: {0} -> {1}", old.Domains, entity.Domains), ManageProvider.UserHost);
             }
         }
 

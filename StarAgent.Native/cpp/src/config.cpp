@@ -160,6 +160,9 @@ Config DefaultConfig()
     config.AllowExec = false;
     config.CommandTimeout = 30;
     config.TlsVerify = true;
+    config.LocalPort = 5500;
+    config.AutoUpgrade = true;
+    config.Bootstrap = false;
     return config;
 }
 
@@ -212,6 +215,10 @@ Config LoadConfig(const std::string& path)
         config.AllowExec = GetBoolField(value, "AllowExec", config.AllowExec);
         config.CommandTimeout = GetIntField(value, "CommandTimeout", config.CommandTimeout);
         config.TlsVerify = GetBoolField(value, "TlsVerify", config.TlsVerify);
+        config.LocalPort = GetIntField(value, "LocalPort", config.LocalPort);
+        config.AutoUpgrade = GetBoolField(value, "AutoUpgrade", config.AutoUpgrade);
+        config.Bootstrap = GetBoolField(value, "Bootstrap", config.Bootstrap);
+        config.UpgradeVersion = GetStringField(value, "UpgradeVersion", config.UpgradeVersion);
         if (value.contains("AllowedCommands") && value["AllowedCommands"].is_array())
         {
             config.AllowedCommands.clear();
@@ -249,6 +256,7 @@ void ApplyEnvironment(Config& config)
     };
     set_int({"STARAGENT_METRICSINTERVAL", "STARAGENT_METRICS_INTERVAL"}, config.MetricsInterval);
     set_int({"STARAGENT_COMMANDTIMEOUT", "STARAGENT_COMMAND_TIMEOUT"}, config.CommandTimeout);
+    set_int({"STARAGENT_LOCALPORT", "STARAGENT_LOCAL_PORT"}, config.LocalPort);
 
     auto set_bool = [&](const std::vector<std::string>& names, bool& target) {
         const auto value = EnvironmentValue(names);
@@ -257,6 +265,8 @@ void ApplyEnvironment(Config& config)
     };
     set_bool({"STARAGENT_ALLOWEXEC", "STARAGENT_ALLOW_EXEC"}, config.AllowExec);
     set_bool({"STARAGENT_TLSVERIFY", "STARAGENT_TLS_VERIFY"}, config.TlsVerify);
+    set_bool({"STARAGENT_AUTOUPGRADE", "STARAGENT_AUTO_UPGRADE"}, config.AutoUpgrade);
+    set_bool({"STARAGENT_BOOTSTRAP"}, config.Bootstrap);
 
     const auto allowed = EnvironmentValue({"STARAGENT_ALLOWEDCOMMANDS", "STARAGENT_ALLOWED_COMMANDS"});
     if (!allowed.empty()) config.AllowedCommands = SplitCommandList(allowed);
@@ -276,6 +286,7 @@ void Normalize(Config& config)
     if (config.DataDir.empty()) config.DataDir = platform::DefaultDataDir();
     if (config.MetricsInterval <= 0) config.MetricsInterval = 60;
     if (config.CommandTimeout <= 0) config.CommandTimeout = 30;
+    if (config.LocalPort < 0 || config.LocalPort > 65535) config.LocalPort = 5500;
     for (auto& item : config.AllowedCommands) item = Trim(item);
     config.AllowedCommands.erase(
         std::remove_if(config.AllowedCommands.begin(), config.AllowedCommands.end(),
@@ -287,7 +298,11 @@ void Validate(const Config& config)
 {
     if (config.Server.empty())
     {
-        throw std::runtime_error("Server is required (configure staragent.json or STARAGENT_SERVER)");
+        throw std::runtime_error(
+            "未配置 Server，请任选一种方式指定：\n"
+            "  staragent run --server http://127.0.0.1:6600\n"
+            "  设置环境变量 STARAGENT_SERVER=http://127.0.0.1:6600\n"
+            "  在 staragent.json 中写入 {\"Server\": \"http://127.0.0.1:6600\"}");
     }
     const auto scheme_end = config.Server.find("://");
     if (scheme_end == std::string::npos)
@@ -333,6 +348,10 @@ void SaveConfigAtomic(const std::string& path, const Config& source)
     value["AllowedCommands"] = config.AllowedCommands;
     value["CommandTimeout"] = config.CommandTimeout;
     value["TlsVerify"] = config.TlsVerify;
+    value["LocalPort"] = config.LocalPort;
+    value["AutoUpgrade"] = config.AutoUpgrade;
+    value["Bootstrap"] = config.Bootstrap;
+    if (!config.UpgradeVersion.empty()) value["UpgradeVersion"] = config.UpgradeVersion;
 
     WriteFileAtomic(path, value.dump(2) + "\n");
 }

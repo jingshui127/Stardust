@@ -39,6 +39,8 @@ public partial class NodeOnline : Entity<NodeOnline>, IOnlineModel2
     {
         // 截取部分进程字段，避免过长无法保存
         this.TrimExtraLong(__.Processes, __.MACs, __.DriveInfo);
+        // 多网卡机器的DNS地址列表很容易超过字段长度，截断避免登录与心跳因系统信息失败
+        this.TrimExtraLong(__.Dns, __.Gateway);
 
         if (!Dirtys[nameof(MemoryUsed)] && Node != null) MemoryUsed = Node.Memory - (FreeMemory > 0 ? FreeMemory : AvailableMemory);
         if (!Dirtys[nameof(SpaceUsed)] && Node != null) SpaceUsed = Node.TotalSize - AvailableFreeSpace;
@@ -250,6 +252,8 @@ public partial class NodeOnline : Entity<NodeOnline>, IOnlineModel2
 
         if (inf.AvailableMemory > 0) online.AvailableMemory = (Int32)(inf.AvailableMemory / 1024 / 1024);
         if (inf.FreeMemory > 0) online.FreeMemory = (Int32)(inf.FreeMemory / 1024 / 1024);
+        // 部分客户端/内核取不到 MemAvailable 会上报 0，此时用空闲内存兜底，避免列表上可用内存长期为 0
+        if (online.AvailableMemory <= 0 && online.FreeMemory > 0) online.AvailableMemory = online.FreeMemory;
         MemoryUsed = online.Memory - (online.FreeMemory > 0 ? online.FreeMemory : online.AvailableMemory);
         if (inf.AvailableFreeSpace > 0) online.AvailableFreeSpace = (Int32)(inf.AvailableFreeSpace / 1024 / 1024);
         if (!online.DriveInfo.IsNullOrEmpty()) online.DriveInfo = online.DriveInfo;
@@ -263,16 +267,22 @@ public partial class NodeOnline : Entity<NodeOnline>, IOnlineModel2
 
         if (inf.AvailableMemory > 0) online.AvailableMemory = (Int32)(inf.AvailableMemory / 1024 / 1024);
         if (inf.FreeMemory > 0) online.FreeMemory = (Int32)(inf.FreeMemory / 1024 / 1024);
+        // 部分客户端/内核取不到 MemAvailable 会上报 0，此时用空闲内存兜底，避免列表上可用内存长期为 0
+        if (online.AvailableMemory <= 0 && online.FreeMemory > 0) online.AvailableMemory = online.FreeMemory;
         MemoryUsed = online.Memory - (online.FreeMemory > 0 ? online.FreeMemory : online.AvailableMemory);
         if (inf.AvailableFreeSpace > 0) online.AvailableFreeSpace = (Int32)(inf.AvailableFreeSpace / 1024 / 1024);
         if (!inf.DriveInfo.IsNullOrEmpty()) online.DriveInfo = inf.DriveInfo;
         if (inf.CpuRate > 0) online.CpuRate = inf.CpuRate;
-        if (inf.Temperature > 0) online.Temperature = inf.Temperature;
+        // 温度统一保留一位小数，避免客户端上报浮点尾数（如 27.850000000000023）直接落库
+        if (inf.Temperature > 0) online.Temperature = Math.Round(inf.Temperature, 1);
         if (inf.Battery > 0) online.Battery = inf.Battery;
         /*if (inf.Signal > 0)*/
         online.Signal = inf.Signal;
         if (inf.UplinkSpeed > 0) online.UplinkSpeed = (Int64)inf.UplinkSpeed;
         if (inf.DownlinkSpeed > 0) online.DownlinkSpeed = (Int64)inf.DownlinkSpeed;
+        // 计数器回绕或重启会让上报速度变成负数，归零避免负速度长期停留在在线记录上
+        if (inf.UplinkSpeed < 0) online.UplinkSpeed = 0;
+        if (inf.DownlinkSpeed < 0) online.DownlinkSpeed = 0;
         if (inf.SystemLoad > 0) online.SystemLoad = inf.SystemLoad;
         if (inf.DiskIOPS > 0) online.DiskIOPS = inf.DiskIOPS;
         if (inf.DiskActiveTime > 0) online.DiskActiveTime = inf.DiskActiveTime;
@@ -311,6 +321,11 @@ public partial class NodeOnline : Entity<NodeOnline>, IOnlineModel2
         online.Data = dic.ToJson();
     }
 
+    /// <summary>修正速度值。计数器回绕或重启会让上报速度为负，统一归零</summary>
+    /// <param name="speed">上报速度，字节每秒</param>
+    /// <returns>非负速度</returns>
+    internal static Int64 FixSpeed(Double speed) => speed > 0 ? (Int64)speed : 0;
+
     private void CreateData(PingInfo inf, String ip)
     {
         var olt = this;
@@ -327,11 +342,11 @@ public partial class NodeOnline : Entity<NodeOnline>, IOnlineModel2
             AvailableFreeSpace = olt.AvailableFreeSpace,
             CpuRate = inf.CpuRate,
             SystemLoad = inf.SystemLoad,
-            Temperature = inf.Temperature,
+            Temperature = Math.Round(inf.Temperature, 1),
             Battery = inf.Battery,
             Signal = inf.Signal,
-            UplinkSpeed = (Int64)inf.UplinkSpeed,
-            DownlinkSpeed = (Int64)inf.DownlinkSpeed,
+            UplinkSpeed = FixSpeed(inf.UplinkSpeed),
+            DownlinkSpeed = FixSpeed(inf.DownlinkSpeed),
             DiskIOPS = inf.DiskIOPS,
             DiskActiveTime = inf.DiskActiveTime,
             ProcessCount = inf.ProcessCount,

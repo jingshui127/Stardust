@@ -1,14 +1,15 @@
 # StarAgent Native C++
 
-StarAgent 的 C++17 原生实现，与 `spec/protocol.md`、Go/Rust 实现保持协议对齐。支持登录/注销、心跳、令牌续期、`NewServer` 迁移、指数退避重连、HTTP 命令回复、WebSocket 通知、指标采集、内置命令、事件补报与服务安装。
+StarAgent 的 C++17 原生实现，与 `spec/protocol.md`、Go/Rust 实现保持协议对齐。支持登录/注销、心跳、令牌续期、`NewServer` 迁移、指数退避重连、HTTP 命令回复、WebSocket 通知、指标采集、内置命令、事件补报。原生 Agent 只提供前台进程，**不注册系统服务**，进程守护由部署侧负责。
 
 ## 状态
 
 - Windows（MSVC 19.51 / Visual Studio 2026，x64）：实际编译、CTest 与一致性测试通过。
+- Linux ARM64 真机（Ubuntu 26.04，A2 / A4-WiFi）：依赖目标机 `g++`/`cmake`，用 `-DFETCHCONTENT_SOURCE_DIR_IXWEBSOCKET` 指向离线源码即可构建；登录、心跳、指标上报与一致性测试 6/6 通过。
 - 一致性测试：`conformance --agent staragent.exe --scenario all` → **6 passed / 0 failed**（basic、http-fallback、dedup、expired、reconnect、events）。
-- 单元测试：`ctest -C Release` → **2/2**（`staragent_tests` 50/50 checks、`staragent --version`）。
+- 单元测试：`ctest -C Release` → **2/2**（`staragent_tests` 70/70 checks、`staragent --version`）。
 - 真实服务端：在真实 Kestrel StarServer 上完成登录、自动注册、Code/Secret 持久化与在线状态验证（`NativeAgentIntegrationTests`，`ProductCode=StarAgent-Cpp`）。
-- Linux/macOS：源码路径完整（`platform_linux.cpp`、`platform_macos.cpp`、`service_posix.cpp`），本机未完成交叉编译验证，建议在对应平台或 CI 上执行 `cmake --build` + `ctest`。
+- 小内存设备构建：`cmake --build build --target staragent --parallel 1`；`--parallel 2` 在 512MB~1GB 的板子上会被 OOM Killer 终止。
 
 ## 目录
 
@@ -17,22 +18,20 @@ cpp/
 ├── CMakeLists.txt
 ├── README.md
 ├── src/
-│   ├── main.cpp                CLI：run/once/version/install/uninstall/start/stop/status
+│   ├── main.cpp                CLI：run/once/version
 │   ├── agent.{hpp,cpp}         登录、心跳、迁移、通知、命令调度、事件补报
 │   ├── config.{hpp,cpp}        staragent.json、STARAGENT_* 环境变量、原子持久化
 │   ├── protocol.{hpp,cpp}      PascalCase JSON 模型、时间格式、响应解包
 │   ├── http_client.{hpp,cpp}   /node/* HTTP 客户端（cpp-httplib）
 │   ├── ws_client.{hpp,cpp}     /node/notify WebSocket（IXWebSocket）
 │   ├── executor.{hpp,cpp}      命令去重/过期/延迟/并发/超时/白名单
-│   ├── metrics.{hpp,cpp}       CPU/内存/磁盘/网络/进程/负载指标
+│   ├── metrics.{hpp,cpp}       CPU/内存/磁盘/网络/进程/TCP 连接/温度/磁盘 IO/负载指标
 │   ├── events.{hpp,cpp}        有界事件队列与落盘
 │   ├── logging.{hpp,cpp}       按天轮转日志（保留 7 天）
 │   ├── platform.hpp            平台抽象
 │   ├── platform_windows.cpp    PDH / GlobalMemoryStatusEx / GetAdaptersAddresses / SMBIOS
 │   ├── platform_linux.cpp      /proc /sys /statvfs / getifaddrs
 │   ├── platform_macos.cpp      sysctl / host_statistics / vm_stat / getifaddrs
-│   ├── service_windows.cpp     Windows Service（SCM）
-│   ├── service_posix.cpp       systemd / OpenWrt procd / launchd
 │   └── output_buffer.hpp       64KB 头尾保留缓冲
 ├── tests/tests.cpp             协议、配置、事件队列、命令执行器单元测试
 └── third_party/
@@ -84,7 +83,7 @@ cmake --build StarAgent.Native/cpp/build --parallel
 ctest --test-dir StarAgent.Native/cpp/build --output-on-failure
 ```
 
-OpenWrt 交叉编译时传入目标工具链文件（`-DCMAKE_TOOLCHAIN_FILE=...`）；`service_posix.cpp` 会在目标系统检测 `/etc/rc.common` + `/sbin/procd` 并安装 procd 脚本。
+OpenWrt 交叉编译时传入目标工具链文件（`-DCMAKE_TOOLCHAIN_FILE=...`）；目标系统检测 `/etc/rc.common` + `/sbin/procd` 的 procd 脚本模板见 [`../packaging/install/staragent.init`](../packaging/install/staragent.init)。
 
 ### 离线 / 不启用 WebSocket
 
@@ -134,7 +133,9 @@ CMake 使用 `find_package(OpenSSL QUIET)`：
   "AllowExec": false,
   "AllowedCommands": [],
   "CommandTimeout": 30,
-  "TlsVerify": true
+  "TlsVerify": true,
+  "LocalPort": 5500,
+  "AutoUpgrade": true
 }
 ```
 
@@ -143,6 +144,7 @@ CMake 使用 `find_package(OpenSSL QUIET)`：
 - `Server` 必填，scheme 仅 `http`/`https`。
 - `MetricsInterval` 5–3600 秒；`CommandTimeout` 1–300 秒。
 - `Code`/`Secret` 由登录响应写入，原子落盘并限制为 `0600`（Windows 上为 CRT 只读位 + 数据目录所有者隔离，见“已知限制”）。
+- `UpgradeVersion` 由升级流程成功后自动写入（无需手工配置），用于记录已应用的版本，避免服务端仍推送同一版本时反复替换重启。
 
 ### 环境变量
 
@@ -159,6 +161,9 @@ CMake 使用 `find_package(OpenSSL QUIET)`：
 | AllowedCommands | `STARAGENT_ALLOWEDCOMMANDS`、`STARAGENT_ALLOWED_COMMANDS` |
 | CommandTimeout | `STARAGENT_COMMANDTIMEOUT`、`STARAGENT_COMMAND_TIMEOUT` |
 | TlsVerify | `STARAGENT_TLSVERIFY`、`STARAGENT_TLS_VERIFY` |
+| LocalPort | `STARAGENT_LOCALPORT`、`STARAGENT_LOCAL_PORT` |
+| AutoUpgrade | `STARAGENT_AUTOUPGRADE`、`STARAGENT_AUTO_UPGRADE` |
+| Bootstrap | `STARAGENT_BOOTSTRAP` |
 | Code / Secret / Project / Channel | `STARAGENT_CODE` / `STARAGENT_SECRET` / `STARAGENT_PROJECT` / `STARAGENT_CHANNEL` |
 
 ### CLI
@@ -166,12 +171,12 @@ CMake 使用 `find_package(OpenSSL QUIET)`：
 ```text
 staragent run        [--config path] [--server url] [--data dir] [--log-level level] [--allow-exec] [--console]
 staragent once       [--config path] [--console]
+staragent bootstrap  [--config path] [--console]
 staragent version
-staragent install    [--config path] [--server url] [--data dir] [--user user] [--log-level level] [--dir dir]
-staragent uninstall | start | stop | status
 ```
 
-`run` 为长连接模式；`once` 登录、心跳并处理本次心跳中的命令后退出，适合自检/定时任务。
+`run` 为前台常驻长连接模式；`once` 登录、心跳并处理本次心跳中的命令后退出，适合自检/定时任务；
+`bootstrap` 登录后向服务端取包，安装 .NET 运行时与完整版 StarAgent（需 root/管理员）。
 
 ## 持久化与日志
 
@@ -188,7 +193,10 @@ staragent uninstall | start | stop | status
 | `node/synctime` | 全平台 | 可选时间字符串；无参数使用服务端时间 |
 | `node/setchannel` | 全平台 | 修改并持久化更新通道 |
 | `node/restart` | 全平台 | 1 秒后重启自身进程 |
-| `node/reboot` / `deploy/*` / `framework/install` | — | 首版回复“不支持命令” |
+| `node/reboot` / `node/shutdown` | 全平台 | 1.5 秒后重启/关机（Linux/macOS 调 `reboot`/`poweroff`，Windows 用 `shutdown.exe` 延迟 30 秒） |
+| `node/upgrade` | 全平台 | 立即检查升级，有新版时走自动升级流程 |
+| `node/bootstrap` | 全平台 | 引导安装 .NET 运行时与完整版 StarAgent；需 `Bootstrap=true`，默认关闭时回复“引导安装未启用” |
+| `deploy/*` / `framework/install` | — | 回复“不支持命令”（原生 Agent 不做远程发布与 .NET 运行时安装） |
 
 安全与限制：
 
@@ -200,48 +208,87 @@ staragent uninstall | start | stop | status
 - 命令按 `Id` 去重 1 小时；`Expire` 过期回复 `Status=3`；`StartTime` 未来时先回复 `Status=1` 再延迟执行。
 - 所有回复（过期、延迟、取消、成功、失败）都携带原始 `Id`。
 
-## 安装为系统服务
+## 本地接口与局域网发现
 
-### Windows（管理员）
+`LocalPort`（默认 5500，`0` 关闭）上监听 UDP，线格式与 .NET StarAgent 完全一致：
+**SRMP 帧**（1 Flag + 1 sequence + 2 length + payload）+ **JsonEncoder 载荷**（`[7位长度][action][4字节长度][JSON]`）。
+
+- `Info`：返回 `AgentInfo`（`ProcessId`/`ProcessName`/`Version`/`FileName`/`Arguments`/`IP`/`Server`/`Code`/`Services`），供本机应用探测与**局域网广播发现**（`LocalStarClient.Scan()` 向 `255.255.255.255:5500` 广播 `Info` 帧）使用。
+- `Ping`：返回 `{"ServerTime": <毫秒时间戳>}`。
+- 其他 action 回复错误帧（code=404）。
+
+验证（Windows PowerShell，发一帧 `Info`）：
 
 ```powershell
-staragent.exe install --config C:\ProgramData\StarAgent\staragent.json --server https://star.example.com:6600
-staragent.exe start
-staragent.exe status
-staragent.exe stop
-staragent.exe uninstall
+$a=[Text.Encoding]::UTF8.GetBytes('Info'); $p=[byte[]](@(4)+$a)
+$f=[byte[]](@(0x01,0x01,[byte]($p.Length -band 0xFF),[byte](($p.Length -shr 8) -band 0xFF)))+$p
+$u=New-Object Net.Sockets.UdpClient; $u.Client.ReceiveTimeout=3000
+$u.Send($f,$f.Length,(New-Object Net.IPEndPoint([Net.IPAddress]::Loopback,5500))) | Out-Null
+[Text.Encoding]::UTF8.GetString($u.Receive([ref](New-Object Net.IPEndPoint([Net.IPAddress]::Any,0))))
 ```
 
-服务名 `StarAgentNative`；服务命令行包含 `run --config <path> --service`。安装/卸载/启动/停止需要管理员权限。
+> 同一台机器上已有 .NET StarAgent 占用 5500 时，原生 Agent 会记录“bind failed”并跳过本地接口（不影响心跳与采集）。
 
-### Linux（systemd，root）
+## 以守护进程方式运行
 
-```bash
-sudo staragent install --config /etc/staragent/staragent.json --server https://star.example.com:6600
-sudo systemctl enable --now staragent   # install 已自动 enable
-staragent status
+原生 Agent 只提供前台进程（`staragent run`），不注册系统服务；重启策略、开机自启、日志重定向由部署侧托管。模板见 [`../packaging/install/`](../packaging/install/)。
+
+### Linux（systemd）
+
+```ini
+[Unit]
+Description=StarAgent Native
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/staragent/staragent run --config /etc/staragent/staragent.json
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-写入 `/etc/systemd/system/staragent.service`，`Restart=always`，可选 `--user` 指定运行用户。
+写入 `/etc/systemd/system/staragent.service` 后 `systemctl daemon-reload && systemctl enable --now staragent`。
 
-### OpenWrt（procd，root）
+### OpenWrt（procd）
 
-检测到 `/etc/rc.common` 与 `/sbin/procd` 时写入 `/etc/init.d/staragent`（`USE_PROCD=1`，含 respawn），并执行 `enable`。
+检测到 `/etc/rc.common` 与 `/sbin/procd` 的环境使用 procd 脚本（`USE_PROCD=1`，`procd_set_param respawn`）。
+
+### Windows（任务计划程序）
+
+原生 Agent 不注册为 Windows 服务，使用任务计划程序在开机时以 SYSTEM 身份启动：
+
+```powershell
+schtasks /Create /TN StarAgentNative /TR "C:\Program Files\StarAgent\staragent.exe run --config C:\ProgramData\StarAgent\staragent.json" /SC ONSTART /RU SYSTEM /RL HIGHEST /F
+```
 
 ### macOS（launchd）
 
-root 写入 `/Library/LaunchDaemons/com.newlifex.staragent.plist`；普通用户写入 `~/Library/LaunchAgents/`。`install` 会 `launchctl load -w`，`uninstall` 会 unload 并删除 plist。
+写入 `/Library/LaunchDaemons/com.newlifex.staragent.plist`（root，`KeepAlive=true`）后 `launchctl load -w`。
 
 ## 能力边界与已知限制
 
-- **不自升级**：收到 `/node/upgrade` 非空版本时只记录日志并上报 `Upgrade` 事件，需人工更新；`cap:upgrade=false`。
+- **自动升级**：`/node/upgrade` 返回更高版本时，下载 `Source` 到 `DataDir/Update/`，按 `FileHash`（MD5）校验后把当前可执行文件改名为 `*.old`、写入新文件并重启；`AutoUpgrade=false` 时只记录事件。**仅支持单文件原生包**（裸二进制）；`.zip` 包回复“需人工升级”。下载或校验失败不再每次心跳重试，而是退避 10 分钟后再试；成功应用后把版本写入 `UpgradeVersion`，同一版本不会重复替换。
 - **deploy / framework / reboot 未实现**：按协议回复“不支持命令”。
 - **WebSocket 可选**：`-DSTARAGENT_WITH_WS=OFF` 时仍可通过心跳 `Commands` 执行命令；但 `--scenario reconnect/dedup` 等 WS 场景不可用。
 - **TLS 依赖 OpenSSL**：未检测到 OpenSSL 的构建只能 `http/ws`；生产必须安装 OpenSSL 并重新构建。
 - **Windows 权限**：`0600` 通过 CRT `_chmod` 与数据目录隔离近似实现，无法像 POSIX 一样精确设置 ACL；建议将 `DataDir` 放在受控目录。
-- **node/restart 与 SCM**：重启会以原命令行拉起新进程；若父进程由 SCM 启动，子进程的 `--service` 在非 SCM 环境下会回退为控制台模式。生产建议同时配置 Windows 服务恢复策略，或改用服务管理器重启。
-- **Linux/macOS 验证**：实现已提供，但当前 Windows 环境未完成对应平台的编译/运行验证；建议在 CI 增加 Ubuntu 与 macOS 构建任务。
-- **指标降级**：任何单项采集失败只把该字段填 0，不跳过心跳；`Temperature`、`Battery`、`Tcp*` 等未采集字段为 0。
+- **控制台中文输出**：Windows 控制台按本地代码页（简体中文为 936/GBK）解码收到的字节，程序内部字符串是 UTF-8，直写会显示乱码。启动时把 `stdout`/`stderr` 换成专用缓冲区：输出到控制台时转宽字符走 `WriteConsoleW`（不受代码页影响，也不需要用户 `chcp 65001`），重定向到文件或管道时保持 UTF-8 字节。
+- **node/restart**：以原命令行拉起新进程（Windows 使用 `DETACHED_PROCESS`，POSIX 使用 `setsid`），随后当前进程退出；守护进程由部署侧（systemd/procd/计划任务/launchd）重新接管。
+- **Linux/macOS 验证**：Linux ARM64 已在 A2/A4 真机验证（构建、登录、心跳、指标、命令往返、conformance），CI `native-agents.yml` 的 `cpp-linux` 任务在 ubuntu 上做构建+单测+一致性测试；macOS 未做真机验证，建议补充 CI 构建任务。
+- **指标降级**：任何单项采集失败只把该字段填 0，不跳过心跳；无电池/无传感器的设备 `Battery`、`Temperature`、`Signal` 为 0。
+- **平台采集差异**：
+  - 温度：Linux 读 `/sys/class/thermal`/`hwmon`；Windows 读 PDH 计数器 `Thermal Zone Information(*)\Temperature`（开尔文换算摄氏度，无热区为 0）；macOS 为 0。
+  - 电量：Windows 用 `GetSystemPowerStatus`，Linux 读 `/sys/class/power_supply/BAT*/capacity`；macOS 为 0。
+  - 无线信号：仅 Linux（`/proc/net/wireless`，兼容 70/100 两种满值）；Windows/macOS 为 0。
+  - 磁盘 IO：Linux 用 `/proc/diskstats`，Windows 用 PDH `PhysicalDisk(_Total)`；macOS 为 0。
+  - `MaxOpenFiles`：仅 Linux（`getrlimit`）。
+- **网络质量**：后台线程每 48 秒对网关、DNS、服务端各做 5 次 ICMP 探测（Windows 用 `IcmpSendEcho`，Linux/macOS 调 `ping`），心跳上报 `GatewayLatency`/`DnsLatency`/`ServerLatency`、丢包率与 `IntranetScore`/`InternetScore`（评分算法与 .NET `PingMonitor` 一致：`成功率 × exp(-0.001×(延迟-1))`）；本地回环 DNS 改用 `223.5.5.5`。
+- **Linux 板级标识**：`Vendor`/`Product`/`SerialNumber`/`Board` 优先取 `/etc/os-release` 中设备端写入的字段（与 .NET `MachineInfo` 约定一致，如 `Board=A2-2026-1G`），缺失时回落 DMI 与设备树；`UUID` 优先 `/etc/uuid`。
 - **无 Android/iOS 实现**；移动端见仓库其他原生目录。
 - **状态文件**：`Code`/`Secret` 写入 `staragent.json`；`events.json` 与日志位于 `DataDir`，不会被提交到仓库。
 

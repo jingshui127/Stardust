@@ -411,7 +411,19 @@ public class ServiceController : DisposeBase
                 p.ForceKill();
             }
 
-            if (p.GetHasExited()) WriteLog("Process [PID={0}] has exited, ExitCode={1}", p.Id, p.ExitCode);
+            if (p.GetHasExited())
+            {
+                // 外部接管的进程（Process.GetProcessById）不允许读取 ExitCode，
+                // 不能因为拿不到退出码就把已正常退出误报为停止失败
+                try
+                {
+                    WriteLog("Process [PID={0}] has exited, ExitCode={1}", p.Id, p.ExitCode);
+                }
+                catch
+                {
+                    WriteLog("Process [PID={0}] has exited", p.Id);
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -812,7 +824,7 @@ public class ServiceController : DisposeBase
 
         if (!first && !changed.IsNullOrEmpty())
         {
-            var msg = L.T("File [{0}] changed; stopping the application and starting it {1}ms later", changed, Delay);
+            var msg = L.TLog("File [{0}] changed; stopping the application and starting it {1}ms later", changed, Delay);
             WriteLog(msg);
 
             // 进入就绪状态
@@ -857,9 +869,9 @@ public class ServiceController : DisposeBase
         DefaultSpan.Current?.AppendTag(msg);
 
         if (format.Contains("错误") || format.Contains("失败") || format.Contains("error", StringComparison.OrdinalIgnoreCase) || format.Contains("fail", StringComparison.OrdinalIgnoreCase) || format.Contains("exception", StringComparison.OrdinalIgnoreCase))
-            WriteEvent("error", L.T(format, args));
+            WriteEvent("error", L.TLog(format, args));
         else
-            WriteEvent("info", L.T(format, args));
+            WriteEvent("info", L.TLog(format, args));
     }
 
     /// <summary>写事件到服务端</summary>

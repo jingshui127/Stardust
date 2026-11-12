@@ -4,11 +4,14 @@
 
 #include "config.hpp"
 #include "output_buffer.hpp"
+#include "platform_posix.hpp"
 
 #include <algorithm>
 #include <arpa/inet.h>
+#include <cctype>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -48,12 +51,7 @@ bool g_has_cpu_sample = false;
 
 std::string ReadFile(const std::string& path, std::size_t max = 1024 * 1024)
 {
-    std::ifstream stream(path, std::ios::binary);
-    if (!stream) return {};
-    std::string result(max, '\0');
-    stream.read(result.data(), static_cast<std::streamsize>(max));
-    result.resize(static_cast<std::size_t>(stream.gcount()));
-    return result;
+    return internal::ReadSysFile(path, max);
 }
 
 std::string SysctlString(const char* name)
@@ -74,57 +72,11 @@ std::uint64_t SysctlU64(const char* name)
     return value;
 }
 
-std::string FormatMac(const unsigned char* data, std::size_t length)
-{
-    std::string result;
-    char text[8];
-    for (std::size_t i = 0; i < length; i++)
-    {
-        std::snprintf(text, sizeof(text), "%s%02X", i == 0 ? "" : "-", data[i]);
-        result += text;
-    }
-    return result;
-}
-
-std::string SockaddrToIp(const sockaddr* address)
-{
-    if (address == nullptr) return {};
-    char text[INET6_ADDRSTRLEN] = {};
-    if (address->sa_family == AF_INET)
-    {
-        const auto* ipv4 = reinterpret_cast<const sockaddr_in*>(address);
-        if (::inet_ntop(AF_INET, &ipv4->sin_addr, text, sizeof(text)) == nullptr) return {};
-        return text;
-    }
-    if (address->sa_family == AF_INET6)
-    {
-        const auto* ipv6 = reinterpret_cast<const sockaddr_in6*>(address);
-        if (::inet_ntop(AF_INET6, &ipv6->sin6_addr, text, sizeof(text)) == nullptr) return {};
-        return text;
-    }
-    return {};
-}
-
-bool IsVirtualInterface(const std::string& name)
-{
-    const auto lower = ToLower(name);
-    const char* prefixes[] = {"lo", "utun", "awdl", "llw", "bridge", "vmnet", "vboxnet", "tun", "tap", "gif", "stf"};
-    for (const char* prefix : prefixes)
-    {
-        if (StartsWith(lower, prefix)) return true;
-    }
-    return false;
-}
-
-std::string CleanId(std::string value)
-{
-    value = Trim(value);
-    const auto lower = ToLower(value);
-    static const std::set<std::string> invalid = {"", "none", "unknown", "not specified", "not settable",
-                                                  "default string", "0",
-                                                  "00000000-0000-0000-0000-000000000000"};
-    return invalid.count(lower) > 0 ? std::string() : value;
-}
+// 以下解析逻辑与 Linux 共用，实现见 platform_posix.cpp。
+using internal::CleanId;
+using internal::FormatMac;
+using internal::IsVirtualInterface;
+using internal::SockaddrToIp;
 
 std::string ParseRouteGateway()
 {
@@ -144,19 +96,7 @@ std::string ParseRouteGateway()
     return gateway;
 }
 
-std::string ParseDns()
-{
-    std::istringstream stream(ReadFile("/etc/resolv.conf"));
-    std::string line;
-    std::vector<std::string> servers;
-    while (std::getline(stream, line))
-    {
-        std::istringstream fields(line);
-        std::string key, value;
-        if (fields >> key >> value && key == "nameserver") servers.push_back(value);
-    }
-    return Join(servers, ",");
-}
+std::string ParseDns() { return internal::DnsServers(); }
 
 } // namespace
 
@@ -313,6 +253,105 @@ std::uint64_t UptimeSeconds()
     return now > boot.tv_sec ? static_cast<std::uint64_t>(now - boot.tv_sec) : 0;
 }
 
+TcpCounts TcpStates()
+{
+    // macOS 没有 /proc/net/tcp，借助 netstat 统计各状态连接数
+    TcpCounts result;
+    static const std::atomic<bool> never_cancelled{false};
+    const auto shell = RunShell("netstat -an -p tcp", 5000, never_cancelled);
+    std::istringstream stream(shell.Output);
+    std::string line;
+    while (std::getline(stream, line))
+    {
+        const auto text = Trim(line);
+        if (text.empty()) continue;
+        const auto space = text.find_last_of(" \t");
+        if (space == std::string::npos) continue;
+        const auto state = text.substr(space + 1);
+        if (state == "ESTABLISHED")
+            result.Established++;
+        else if (state == "TIME_WAIT")
+            result.TimeWait++;
+        else if (state == "CLOSE_WAIT")
+            result.CloseWait++;
+    }
+    return result;
+}
+
+double Temperature()
+{
+    // macOS 温度需要 IOKit SMC 私有接口，暂不采集
+    return 0;
+}
+
+double BatteryPercent()
+{
+    // macOS 电量需要 IOKit AppleSmartBattery，暂不采集
+    return 0;
+}
+
+int WirelessSignal()
+{
+    // 无线信号强度暂不采集
+    return 0;
+}
+
+DiskIoSample DiskIo()
+{
+    // 磁盘 IO 速率暂不采集
+    return {};
+}
+
+std::uint64_t MaxOpenFiles() { return 0; }
+
+ProbeResult PingProbe(const std::string& host, int timeout_ms, int count){
+    ProbeResult result;
+    if (host.empty() || count <= 0) return result;
+
+    static const std::atomic<bool> never_cancelled{false};
+    const auto timeout_sec = std::max(1, (timeout_ms + 999) / 1000);
+    const auto command = "ping -c " + std::to_string(count) + " -t " + std::to_string(timeout_sec) + " " + host;
+    const auto shell = RunShell(command, (count + 2) * 1000 + 2000, never_cancelled);
+    if (shell.Output.empty()) return result;
+
+    int success = 0;
+    double total = 0;
+    std::size_t position = 0;
+    while ((position = shell.Output.find("time=", position)) != std::string::npos)
+    {
+        position += 5;
+        auto end = position;
+        while (end < shell.Output.size() &&
+               (std::isdigit(static_cast<unsigned char>(shell.Output[end])) || shell.Output[end] == '.'))
+        {
+            end++;
+        }
+        if (end > position)
+        {
+            success++;
+            total += std::strtod(shell.Output.substr(position, end - position).c_str(), nullptr);
+        }
+    }
+
+    result.Valid = true;
+    if (success == 0)
+    {
+        result.LossRate = 1;
+        return result;
+    }
+    result.Latency = static_cast<int>(std::lround(total / success));
+    result.LossRate = std::round((1.0 - static_cast<double>(success) / count) * 1000.0) / 1000.0;
+    result.Score = ComputePingScore(result.Latency, success, count);
+    return result;
+}
+
+bool PowerAction(bool reboot)
+{
+    static const std::atomic<bool> never_cancelled{false};
+    const auto shell = RunShell(reboot ? "shutdown -r now" : "shutdown -h now", 5000, never_cancelled);
+    return shell.ExitCode == 0;
+}
+
 double LoadAverage()
 {
     double values[3] = {};
@@ -412,25 +451,6 @@ std::string ExecutablePath()
     return resolved;
 }
 
-std::string ExecutableDir()
-{
-    const auto path = ExecutablePath();
-    const auto position = path.find_last_of('/');
-    return position == std::string::npos ? std::string(".") : path.substr(0, position);
-}
-
-int ProcessId() { return static_cast<int>(::getpid()); }
-bool IsRoot() { return ::geteuid() == 0; }
-
-std::string HomeDir()
-{
-    if (const auto* user = ::getpwuid(::geteuid()))
-    {
-        if (user->pw_dir != nullptr) return user->pw_dir;
-    }
-    return staragent::EnvironmentValue({"HOME"});
-}
-
 std::string DefaultDataDir()
 {
     if (IsRoot()) return "/Library/Application Support/StarAgent";
@@ -451,139 +471,6 @@ std::string TimeZoneName()
         if (position != std::string::npos) return path.substr(position + 9);
     }
     return {};
-}
-
-bool SetSystemTime(TimePoint value)
-{
-    const auto milliseconds =
-        std::chrono::duration_cast<std::chrono::milliseconds>(value.time_since_epoch()).count();
-    timeval time{};
-    time.tv_sec = static_cast<time_t>(milliseconds / 1000);
-    time.tv_usec = static_cast<suseconds_t>((milliseconds % 1000) * 1000);
-    return ::settimeofday(&time, nullptr) == 0;
-}
-
-ShellResult RunShell(const std::string& script, int timeout_ms, const std::atomic<bool>& cancelled)
-{
-    ShellResult result;
-    if (timeout_ms <= 0) timeout_ms = 30000;
-
-    int pipe_fds[2];
-    if (::pipe(pipe_fds) != 0)
-    {
-        result.Error = "pipe failed";
-        return result;
-    }
-
-    const pid_t pid = ::fork();
-    if (pid < 0)
-    {
-        ::close(pipe_fds[0]);
-        ::close(pipe_fds[1]);
-        result.Error = "fork failed";
-        return result;
-    }
-    if (pid == 0)
-    {
-        ::setsid();
-        ::close(pipe_fds[0]);
-        ::dup2(pipe_fds[1], STDOUT_FILENO);
-        ::dup2(pipe_fds[1], STDERR_FILENO);
-        ::close(pipe_fds[1]);
-        int null_fd = ::open("/dev/null", O_RDONLY);
-        if (null_fd >= 0)
-        {
-            ::dup2(null_fd, STDIN_FILENO);
-            ::close(null_fd);
-        }
-        ::execl("/bin/bash", "bash", "-c", script.c_str(), static_cast<char*>(nullptr));
-        ::execl("/bin/sh", "sh", "-c", script.c_str(), static_cast<char*>(nullptr));
-        ::_exit(127);
-    }
-
-    ::close(pipe_fds[1]);
-    ::fcntl(pipe_fds[0], F_SETFL, O_NONBLOCK);
-
-    HeadTailBuffer buffer(64 * 1024);
-    const auto started = SteadyMsNow();
-    bool killed = false;
-    int status = 0;
-
-    auto drain = [&]() {
-        char chunk[4096];
-        for (;;)
-        {
-            const auto read = ::read(pipe_fds[0], chunk, sizeof(chunk));
-            if (read > 0)
-            {
-                buffer.Append(chunk, static_cast<std::size_t>(read));
-                continue;
-            }
-            break;
-        }
-    };
-
-    for (;;)
-    {
-        drain();
-        const auto waited = ::waitpid(pid, &status, WNOHANG);
-        if (waited == pid) break;
-        if (cancelled.load())
-        {
-            result.Cancelled = true;
-            killed = true;
-            ::kill(-pid, SIGKILL);
-            ::kill(pid, SIGKILL);
-            break;
-        }
-        if (SteadyMsNow() - started > timeout_ms)
-        {
-            result.TimedOut = true;
-            killed = true;
-            ::kill(-pid, SIGKILL);
-            ::kill(pid, SIGKILL);
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    }
-
-    if (killed) ::waitpid(pid, &status, 0);
-    drain();
-    ::close(pipe_fds[0]);
-
-    result.Output = buffer.ToString();
-    result.Truncated = buffer.Truncated();
-    result.ExitCode = killed ? -1 : (WIFEXITED(status) ? WEXITSTATUS(status) : -1);
-    return result;
-}
-
-bool RestartSelf(const std::vector<std::string>& arguments)
-{
-    if (arguments.empty()) return false;
-    const pid_t pid = ::fork();
-    if (pid < 0) return false;
-    if (pid == 0)
-    {
-        ::setsid();
-        std::vector<char*> argv;
-        argv.reserve(arguments.size() + 1);
-        for (const auto& argument : arguments) argv.push_back(const_cast<char*>(argument.c_str()));
-        argv.push_back(nullptr);
-        ::execv(argv[0], argv.data());
-        ::_exit(127);
-    }
-    return true;
-}
-
-bool SleepCancelable(int milliseconds, const std::atomic<bool>& cancelled)
-{
-    const auto deadline = SteadyMsNow() + milliseconds;
-    while (!cancelled.load() && SteadyMsNow() < deadline)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(
-            std::min<std::int64_t>(50, std::max<std::int64_t>(1, deadline - SteadyMsNow()))));
-    }
-    return !cancelled.load();
 }
 
 } // namespace staragent::platform

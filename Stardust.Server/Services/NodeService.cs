@@ -27,6 +27,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
     private readonly ICacheProvider _cacheProvider;
     private readonly ITracer _tracer;
     private readonly DnsService _dnsService;
+    private readonly InstallService _installService;
 
     /// <summary>实例化节点服务</summary>
     /// <param name="tokenService">令牌服务</param>
@@ -36,8 +37,9 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
     /// <param name="cacheProvider">缓存提供者</param>
     /// <param name="tracer">跟踪器</param>
     /// <param name="dnsService">DDNS 服务</param>
+    /// <param name="installService">安装引导服务</param>
     /// <param name="serviceProvider">服务提供者</param>
-    public NodeService(ITokenService tokenService, IPasswordProvider passwordProvider, StarServerSetting setting, NodeSessionManager sessionManager, ICacheProvider cacheProvider, ITracer tracer, DnsService dnsService, IServiceProvider serviceProvider) : base(sessionManager, passwordProvider, cacheProvider, serviceProvider)
+    public NodeService(ITokenService tokenService, IPasswordProvider passwordProvider, StarServerSetting setting, NodeSessionManager sessionManager, ICacheProvider cacheProvider, ITracer tracer, DnsService dnsService, InstallService installService, IServiceProvider serviceProvider) : base(sessionManager, passwordProvider, cacheProvider, serviceProvider)
     {
         _tokenService = tokenService;
         _passwordProvider = passwordProvider;
@@ -46,11 +48,25 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         _cacheProvider = cacheProvider;
         _tracer = tracer;
         _dnsService = dnsService;
+        _installService = installService;
 
         Name = "Node";
     }
 
     #region 登录注销
+    /// <summary>节点登录。平台设置的默认语言优先于核心配置</summary>
+    /// <param name="context">设备上下文</param>
+    /// <param name="request">登录请求</param>
+    /// <param name="source">来源</param>
+    /// <returns>登录响应</returns>
+    public override ILoginResponse Login(DeviceContext context, ILoginRequest request, String source)
+    {
+        var rs = base.Login(context, request, source);
+        if (rs is LoginResponse response) response.DefaultLanguage = _setting.GetDefaultLanguage(response.DefaultLanguage);
+
+        return rs;
+    }
+
     /// <summary>验证设备合法性</summary>
     public override Boolean Authorize(DeviceContext context, ILoginRequest request)
     {
@@ -63,7 +79,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         node = CheckNode(node, inf.Node, inf.ProductCode, ip, _setting.NodeCodeLevel);
         if (node == null)
         {
-            WriteHistory(node, L.T("Node authentication"), false, L.T("Hardware information changed too much."), ip);
+            WriteHistory(node, HistoryAction.NodeAuthentication, false, L.TLog("Hardware information changed too much."), ip);
             return false;
         }
 
@@ -78,7 +94,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         }
         if (request.Secret.IsNullOrEmpty() || !_passwordProvider.Verify(node.Secret, request.Secret))
         {
-            WriteHistory(context, L.T("Node authentication"), false, L.T("Secret validation failed."));
+            WriteHistory(context, HistoryAction.NodeAuthentication, false, L.TLog("Secret validation failed."));
             return false;
         }
 
@@ -117,13 +133,13 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                 node = AutoRegister(node, inf, ip, _setting);
             }
 
-            node?.WriteHistory(L.T("Dynamic registration"), true, inf.ToJson(false, false, false), ip);
+            node?.WriteHistory(HistoryAction.DynamicRegistration, true, inf.ToJson(false, false, false), ip);
         }
         catch (Exception ex)
         {
             span?.SetError(ex, null);
 
-            node?.WriteHistory(L.T("Dynamic registration"), false, inf.ToJson(false, false, false), ip);
+            node?.WriteHistory(HistoryAction.DynamicRegistration, false, inf.ToJson(false, false, false), ip);
 
             throw;
         }
@@ -171,7 +187,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         }
 
         // 登录历史
-        WriteHistory(context, L.T("Node authentication"), true, L.T("[{0}/{1}] authenticated {2}", node.Name, node.Code, inf.ToJson(false, false, false)));
+        WriteHistory(context, HistoryAction.NodeAuthentication, true, L.TLog("[{0}/{1}] authenticated {2}", node.Name, node.Code, inf.ToJson(false, false, false)));
 
         // 检查节点上线恢复
         NodeOnlineService.CheckOnline(node);
@@ -244,22 +260,22 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         var level = 5;
         if (!uuid.IsNullOrEmpty() && uuid != node.Uuid)
         {
-            node.WriteHistory(L.T("Login validation"), false, L.T("Unique identifier mismatch (new != old): {0} != {1}", uuid, node.Uuid), ip);
+            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Unique identifier mismatch (new != old): {0} != {1}", uuid, node.Uuid), ip);
             level--;
         }
         if (!guid.IsNullOrEmpty() && guid != node.MachineGuid)
         {
-            node.WriteHistory(L.T("Login validation"), false, L.T("Machine identifier mismatch (new != old): {0} != {1}", guid, node.MachineGuid), ip);
+            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Machine identifier mismatch (new != old): {0} != {1}", guid, node.MachineGuid), ip);
             level--;
         }
         if (!serial.IsNullOrEmpty() && serial != node.SerialNumber)
         {
-            node.WriteHistory(L.T("Login validation"), false, L.T("Computer serial number mismatch (new != old): {0} != {1}", serial, node.SerialNumber), ip);
+            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Computer serial number mismatch (new != old): {0} != {1}", serial, node.SerialNumber), ip);
             level--;
         }
         if (!board.IsNullOrEmpty() && board != node.Board)
         {
-            node.WriteHistory(L.T("Login validation"), false, L.T("Motherboard mismatch (new != old): {0} != {1}", board, node.Board), ip);
+            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Motherboard mismatch (new != old): {0} != {1}", board, node.Board), ip);
             //flag = false;
         }
         //if (!diskid.IsNullOrEmpty() && diskid != node.DiskID)
@@ -269,14 +285,14 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         //}
         if (!node.ProductCode.IsNullOrEmpty() && !productCode.IsNullOrEmpty() && !node.ProductCode.EqualIgnoreCase(productCode))
         {
-            node.WriteHistory(L.T("Login validation"), false, L.T("Product code mismatch (new != old): {0} != {1}", productCode, node.ProductCode), ip);
+            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Product code mismatch (new != old): {0} != {1}", productCode, node.ProductCode), ip);
             //level--;
         }
 
         // 机器名
         if (di.MachineName != node.MachineName)
         {
-            node.WriteHistory(L.T("Login validation"), false, L.T("Machine name mismatch (new != old): {0} != {1}", di.MachineName, node.MachineName), ip);
+            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Machine name mismatch (new != old): {0} != {1}", di.MachineName, node.MachineName), ip);
         }
 
         // 网卡地址
@@ -287,7 +303,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             // 任意匹配则通过
             if (!nodems.Any(e => dims.Contains(e)))
             {
-                node.WriteHistory(L.T("Login validation"), false, L.T("MAC address mismatch (new != old): {0} != {1}", di.Macs, node.MACs), ip);
+                node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("MAC address mismatch (new != old): {0} != {1}", di.Macs, node.MACs), ip);
                 level--;
             }
         }
@@ -300,7 +316,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             // 任意匹配则通过
             if (!nodems.Any(e => dims.Contains(e)))
             {
-                node.WriteHistory(L.T("Login validation"), false, L.T("Disk serial number mismatch (new != old): {0} != {1}", diskid, node.DiskID), ip);
+                node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Disk serial number mismatch (new != old): {0} != {1}", diskid, node.DiskID), ip);
                 level--;
             }
         }
@@ -341,10 +357,10 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             node = QueryByInfo(inf.ProductCode, di, set.NodeCodeLevel).FirstOrDefault();
             if (node != null)
             {
-                var msg = L.T("Node [{0}/{1}] is highly similar to the existing node [{2}]; using the existing node", inf.Code, di.Macs, node.Code);
+                var msg = L.TLog("Node [{0}/{1}] is highly similar to the existing node [{2}]; using the existing node", inf.Code, di.Macs, node.Code);
                 XTrace.WriteLine(msg);
                 span?.AppendTag(msg);
-                node.WriteHistory(L.T("Matched existing node"), true, msg, ip);
+                node.WriteHistory(HistoryAction.MatchedExistingNode, true, msg, ip);
             }
         }
 
@@ -524,6 +540,19 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
     #endregion
 
     #region 心跳保活
+    /// <summary>节点心跳。平台设置的默认语言优先于核心配置</summary>
+    /// <param name="context">设备上下文</param>
+    /// <param name="request">心跳请求</param>
+    /// <param name="response">心跳响应</param>
+    /// <returns>心跳响应</returns>
+    public override IPingResponse Ping(DeviceContext context, IPingRequest? request, IPingResponse? response)
+    {
+        var rs = base.Ping(context, request, response);
+        if (rs is PingResponse ping) ping.DefaultLanguage = _setting.GetDefaultLanguage(ping.DefaultLanguage);
+
+        return rs;
+    }
+
     public override IOnlineModel OnPing(DeviceContext context, IPingRequest? request)
     {
         if (context.Device is not Node node) return null;
@@ -685,9 +714,17 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
 
     #region 升级更新
     /// <summary>升级检查。新版优先匹配 ProductRelease + ProductPackage，回退到旧 NodeVersion 逻辑</summary>
+    /// <param name="context">上下文</param>
     /// <param name="channel">更新通道</param>
     /// <returns></returns>
-    public override IUpgradeInfo? Upgrade(DeviceContext context, String? channel)
+    public override IUpgradeInfo? Upgrade(DeviceContext context, String? channel) => Upgrade(context, channel, null);
+
+    /// <summary>升级检查。指定版本时用于控制台手工升级到指定版本</summary>
+    /// <param name="context">上下文</param>
+    /// <param name="channel">更新通道</param>
+    /// <param name="version">指定版本。为空时按策略匹配；指定版本时忽略去重与通道限制，但仍校验产品编码与安装包匹配</param>
+    /// <returns></returns>
+    public IUpgradeInfo? Upgrade(DeviceContext context, String? channel, String? version)
     {
         // 默认Release通道
         if (!Enum.TryParse<NodeChannels>(channel, true, out var ch)) ch = NodeChannels.Release;
@@ -695,6 +732,9 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
 
         var node = context.Device as Node;
         var ip = context.UserHost;
+
+        // ---- 手工指定版本：用于控制台升级到指定版本 ----
+        if (!version.IsNullOrEmpty()) return TryUpgradeFromVersion(node, version, ch, ip);
 
         // ---- 新路径：ProductRelease + ProductPackage 匹配 ----
         var upgradeInfo = TryUpgradeFromRelease(node, ch);
@@ -707,18 +747,14 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
 
         using var span = _tracer?.NewSpan(nameof(Upgrade), new { node.Name, node.Code, node.Runtime, node.Framework, node.Frameworks, ip, vers = list.Count });
 
-        // 应用过滤规则，使用最新的一个版本
-        var pv = list.OrderByDescending(e => e.ID).FirstOrDefault(e => e.Version != node.LastVersion && e.Match(node));
+        // 应用过滤规则，使用最新的一个版本。命中后即使被去重拦截也不再回退到旧版本，避免降级与来回横跳
+        var pv = list.Where(e => e.Match(node)).OrderByDescending(e => e.ID).FirstOrDefault();
         if (pv == null) return null;
 
-        // 检查是否已经升级过这个版本
-        if (node.LastVersion == pv.Version) return null;
+        var key = BuildUpgradeKey(pv);
+        if (!AllowUpgrade(node, pv.Version, key, pv.Force)) return null;
 
-        node.WriteHistory(L.T("Auto update"), true, $"channel={ch} version={node.Version} last={node.LastVersion} => [{pv.ID}] {pv.Version} {pv.Executor}", ip);
-
-        node.Channel = ch;
-        node.LastVersion = pv.Version;
-        node.Update();
+        RecordUpgrade(node, ch, pv.Version, key, $"[{pv.ID}] {pv.Version} {pv.Executor}", ip);
 
         return new UpgradeInfo
         {
@@ -730,6 +766,45 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             Executor = pv.Executor,
             Force = pv.Force,
             Description = pv.Description,
+        };
+    }
+
+    /// <summary>按指定版本升级。用于控制台手工升级到指定版本，忽略自动去重与通道限制</summary>
+    /// <param name="node">节点</param>
+    /// <param name="version">目标版本号</param>
+    /// <param name="channel">通道</param>
+    /// <param name="ip">操作IP</param>
+    /// <returns></returns>
+    private UpgradeInfo TryUpgradeFromVersion(Node node, String version, NodeChannels channel, String ip)
+    {
+        // 允许指定已停用的发布版本，便于回退或重装同版本
+        var releases = ProductRelease.FindAll().Where(e => e.Version.EqualIgnoreCase(version)).ToList();
+        if (releases.Count == 0) return null;
+
+        // 通用版本或与节点产品编码一致，避免把 .NET 包发给原生 Agent
+        var release = releases.FirstOrDefault(e => e.ProductCode.IsNullOrEmpty() || e.ProductCode.EqualIgnoreCase(node.ProductCode));
+        if (release == null) return null;
+
+        var pkg = release.MatchPackage(node);
+        if (pkg == null) return null;
+
+        var key = BuildUpgradeKey(release, pkg);
+        RecordUpgrade(node, channel, release.Version, key, $"手动升级 Release[{release.Id}] {release.Version} Package[{pkg.TargetRuntime}] {pkg.FileName}", ip);
+
+        // 双层取值：Package优先级高于Release，客户端自行处理空Executor
+        var executor = !pkg.Executor.IsNullOrEmpty() ? pkg.Executor : release.Executor;
+        var preinstall = !pkg.Preinstall.IsNullOrEmpty() ? pkg.Preinstall : release.Preinstall;
+
+        return new UpgradeInfo
+        {
+            Version = release.Version,
+            Source = pkg.Source,
+            FileHash = pkg.FileHash,
+            FileSize = pkg.Size,
+            Preinstall = preinstall,
+            Executor = executor,
+            Force = release.Force,
+            Description = release.Remark,
         };
     }
 
@@ -750,17 +825,14 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
 
         foreach (var release in releases)
         {
-            // 检查是否已经升级过这个版本
-            if (node.LastVersion == release.Version) continue;
-
             var pkg = release.MatchPackage(node);
             if (pkg == null) continue;
 
-            node.WriteHistory(L.T("Auto update"), true, $"channel={channel} version={node.Version} last={node.LastVersion} => Release[{release.Id}] {release.Version} Package[{pkg.TargetRuntime}] {pkg.FileName}", ip);
+            // 命中最新的可升级版本后，即使被去重拦截也不再回退到旧版本，避免降级与来回横跳
+            var key = BuildUpgradeKey(release, pkg);
+            if (!AllowUpgrade(node, release.Version, key, release.Force)) return null;
 
-            node.Channel = channel;
-            node.LastVersion = release.Version;
-            node.Update();
+            RecordUpgrade(node, channel, release.Version, key, $"Release[{release.Id}] {release.Version} Package[{pkg.TargetRuntime}] {pkg.FileName}", ip);
 
             // 双层取值：Package优先级高于Release，客户端自行处理空Executor
             var executor = !pkg.Executor.IsNullOrEmpty() ? pkg.Executor : release.Executor;
@@ -780,6 +852,75 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         }
 
         return null;
+    }
+
+    /// <summary>构造升级指纹。版本、发布记录与安装包哈希共同决定是否需要重新下发，允许同版本号重新打包后再次升级</summary>
+    /// <param name="release">产品发布版本</param>
+    /// <param name="package">产品安装包</param>
+    /// <returns></returns>
+    private static String BuildUpgradeKey(ProductRelease release, ProductPackage package) => $"{release.Version}:{release.Id}:{package?.FileHash}";
+
+    /// <summary>构造升级指纹。用于旧版 NodeVersion 升级策略</summary>
+    /// <param name="version">节点版本策略</param>
+    /// <returns></returns>
+    private static String BuildUpgradeKey(NodeVersion version) => $"{version.Version}:{version.ID}:{version.FileHash}";
+
+    /// <summary>判断是否需要向节点下发升级指令</summary>
+    /// <remarks>
+    /// 一、目标版本与最后版本不同，视为新的升级目标，立即下发；管理员清空最后版本后也会重新下发
+    /// 二、同一版本号重新打包或客户端已上报失败时指纹不一致，允许重新下发
+    /// 三、同一份安装包：非强制升级下发一次即视为完成；强制升级按退避间隔等待节点确认，次数用完则停止
+    /// </remarks>
+    /// <param name="node">节点</param>
+    /// <param name="version">目标版本</param>
+    /// <param name="key">升级指纹</param>
+    /// <param name="force">是否强制升级，即升级后重启</param>
+    /// <returns></returns>
+    private static Boolean AllowUpgrade(Node node, String version, String key, Boolean force)
+    {
+        if (node.LastVersion != version) return true;
+        if (node.LastUpgradeKey != key) return true;
+
+        if (node.UpgradeAttempts >= Node.MaxUpgradeAttempts) return false;
+
+        if (!force) return false;
+
+        var last = node.LastUpgradeTime;
+        return last.Year <= 2000 || last.Add(GetUpgradeBackoff(node.UpgradeAttempts)) <= DateTime.Now;
+    }
+
+    /// <summary>同一份安装包两次下发之间的最小间隔。失败后逐级退避，避免反复下载大安装包</summary>
+    /// <param name="attempts">已下发次数</param>
+    /// <returns></returns>
+    private static TimeSpan GetUpgradeBackoff(Int32 attempts) => attempts switch
+    {
+        <= 1 => TimeSpan.FromMinutes(10),
+        2 => TimeSpan.FromMinutes(30),
+        3 => TimeSpan.FromHours(2),
+        4 => TimeSpan.FromHours(6),
+        _ => TimeSpan.FromHours(24),
+    };
+
+    /// <summary>记录一次升级下发。目标版本不变则累加次数，切换目标版本后重新计数</summary>
+    /// <param name="node">节点</param>
+    /// <param name="channel">通道</param>
+    /// <param name="version">目标版本</param>
+    /// <param name="key">升级指纹</param>
+    /// <param name="detail">发布版本与安装包明细</param>
+    /// <param name="ip">操作IP</param>
+    private static void RecordUpgrade(Node node, NodeChannels channel, String version, String key, String detail, String ip)
+    {
+        var last = node.LastVersion;
+        var attempts = last == version ? node.UpgradeAttempts + 1 : 1;
+
+        node.Channel = channel;
+        node.LastVersion = version;
+        node.LastUpgradeKey = key;
+        node.LastUpgradeTime = DateTime.Now;
+        node.UpgradeAttempts = attempts;
+        node.Update();
+
+        node.WriteHistory(HistoryAction.AutoUpdate, true, L.TLog("Auto update dispatched: channel={0} from={1} last={2} attempts={3} => {4}; awaiting node confirmation", channel, node.Version, last, attempts, detail), ip);
     }
 
     /// <summary>检查节点是否符合规则，并推送dotNet运行时安装指令</summary>
@@ -834,13 +975,20 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             };
             _ = SendCommand(node, model, $"NodeVersion:{pv.Version}");
 
-            node.WriteHistory(L.T("Push dotNet"), true, $"version={node.Framework} => [{pv.ID}] {pv.Version} {fmodel.BaseUrl}", ip);
+            node.WriteHistory(HistoryAction.PushDotNet, true, $"version={node.Framework} => [{pv.ID}] {pv.Version} {fmodel.BaseUrl}", ip);
 
             return pv;
         }
 
         return null;
     }
+
+    /// <summary>获取原生 Agent 的引导安装信息（.NET 运行时 + 完整版 StarAgent）</summary>
+    /// <remarks>原生 Agent 只做采集与指令响应，需要完整能力时由它下载安装运行时与 .NET 版 StarAgent。
+    /// 选包逻辑与安装引导页共用 <see cref="InstallService"/>，避免两处各写一套。</remarks>
+    /// <param name="node">节点</param>
+    /// <returns>引导安装信息；非原生 Agent，或服务端未维护对应安装包时返回null</returns>
+    public BootstrapModel? GetBootstrap(Node node) => _installService.GetBootstrap(node);
     #endregion
 
     #region 下行指令
@@ -860,7 +1008,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         if (ex != null) throw ex;
 
         var app = App.FindByName(jwt?.Subject);
-        if (app == null) throw new ApiException(ApiCode.Unauthorized, L.T("No permission to perform this operation."));
+        if (app == null) throw new ApiException(ApiCode.Unauthorized, L.T("The application [{0}] carried by the token does not exist. Check that the application exists and is enabled in the registry.", jwt?.Subject + ""));
 
         // 安全V-2：未配置密钥的应用（如种子StarWeb）可被匿名冒用登录，禁止其向节点下发命令，防止全节点RCE
         if (app.Secret.IsNullOrEmpty())
@@ -872,7 +1020,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                 throw new ApiException(ApiCode.Forbidden, L.T("[{0}] is not allowed to operate node [{1}].\nFor security, applications cannot send control commands to arbitrary nodes by default.\nIn the registry, edit the controllable nodes of [{0}], add [{2}], or set it to * for all nodes.", app, node, node.Code));
         }
         else if (!_setting.AllowControlNodesWhenEmpty)
-            throw new ApiException(ApiCode.Unauthorized, L.T("No permission to perform this operation."));
+            throw new ApiException(ApiCode.Forbidden, L.T("[{0}] has no controllable nodes configured.\nFor security, applications cannot send control commands to arbitrary nodes by default.\nIn the registry, edit the controllable nodes of [{0}], add [{1}], or set it to * for all nodes. Internal environments may set AllowControlNodesWhenEmpty=true to allow apps without explicit nodes.", app, node.Code));
 
         return SendCommand(node, model, app + "", cancellationToken);
     }
@@ -930,15 +1078,26 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         if (node == null || cmd.NodeID != node.ID)
             throw new ApiException(ApiCode.Forbidden, L.T("[{0}] attempted to reply to command [{1}] that belongs to node [{2}]", node?.Name, cmd.Id, cmd.NodeID));
 
+        var ip = context.UserHost;
+        var oldStatus = cmd.Status;
+
         cmd.Status = model.Status;
         cmd.Result = model.Data;
         cmd.Update();
+
+        // 重启类命令回包时补写节点历史：命令回包只更新 NodeCommand，节点历史里原本看不到“谁在什么时候重启了节点”。
+        // 代理侧不再重复上报同一事件，避免一次重启出现两条记录；仅在状态真正变化时写，网络重试的重复回包不会重复记历史
+        if (oldStatus != model.Status && cmd.Command.EqualIgnoreCase("node/restart", "node/reboot") &&
+            (model.Status == CommandStatus.已完成 || model.Status == CommandStatus.错误))
+        {
+            var success = model.Status == CommandStatus.已完成;
+            NodeHistory.Create(node, HistoryAction.Restart, success, cmd.Command, cmd.CreateUser, ip).Insert();
+        }
 
         // 通过会话管理器内置的响应事件总线广播响应（跨实例广播不阻塞）
         _ = _sessionManager.PublishResponseAsync(model, default);
 
         // 流水线续跑：按命令回包事件驱动步骤/run 状态更新（不轮询、不等待）
-        var ip = context.UserHost;
         _ = Task.Run(() => ProcessPipelineReplyAsync(cmd, model, ip));
 
         return 1;
@@ -1067,7 +1226,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                 {
                     run.BuildFinishedTime = DateTime.Now;
                     run.Status = isCancel ? PipelineStatus.Cancelled : PipelineStatus.Failed;
-                    run.Remark = model.Data;
+                    run.Remark = AppPipelineStep.CutMessage(model.Data, 480);
                     run.Update();
                 }
             }
@@ -1097,7 +1256,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                 else
                 {
                     run.Status = isCancel ? PipelineStatus.Cancelled : PipelineStatus.Failed;
-                    run.Remark = model.Data;
+                    run.Remark = AppPipelineStep.CutMessage(model.Data, 480);
                     run.Update();
                 }
             }
@@ -1117,10 +1276,12 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
     private static Int32 TransitionStepToTerminal(Int64 stepId, String targetStatus, DateTime finishedTime, String message)
     {
         // 参数化条件更新：仅当 Id 匹配且当前 Status='Running' 时才更新；
-        // 数据库层原子保证并发（含多实例）下只有一个线程能抢到续跑权，影响行数为 0 即已被处理
+        // 数据库层原子保证并发（含多实例）下只有一个线程能抢到续跑权，影响行数为 0 即已被处理。
+        // Message 列宽 2000，而回包错误输出（含构建日志尾巴）可达 6000+ 字符，
+        // 必须截断保留尾部（真正的失败原因在末尾），否则 SqlServer 报 truncated 异常导致步骤永远卡在 Running
         return AppPipelineStep.Update(
             new[] { nameof(AppPipelineStep.Status), nameof(AppPipelineStep.FinishedTime), nameof(AppPipelineStep.Message) },
-            new Object[] { targetStatus, finishedTime, message ?? "" },
+            new Object[] { targetStatus, finishedTime, AppPipelineStep.CutMessage(message) },
             new[] { nameof(AppPipelineStep.Id), nameof(AppPipelineStep.Status) },
             new Object[] { stepId, "Running" }
         );
@@ -1209,7 +1370,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
                     {
                         deployStep.Status = "Failed";
                         deployStep.FinishedTime = DateTime.Now;
-                        deployStep.Message = ex.Message;
+                        deployStep.Message = AppPipelineStep.CutMessage(ex.Message);
                         AppDeployHistory.Create(pipeline.DeployId, dn.NodeId, "deploy/install", false, L.T("Failed to dispatch the deploy command to node {0}: {1}", dn.NodeName, ex.Message), ip).Insert();
                     }
                 }
@@ -1229,6 +1390,21 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         foreach (var model in events)
         {
             var success = !model.Type.EqualIgnoreCase("error");
+
+            // 代理升级结果：成功即停止重试；失败则清空指纹并让退避立即到期，使下一轮检查重新下发
+            if (node != null && model.Name.EqualIgnoreCase(HistoryAction.Upgrade))
+            {
+                if (model.Type.EqualIgnoreCase("success"))
+                    node.UpgradeAttempts = Node.MaxUpgradeAttempts;
+                else if (!success)
+                {
+                    node.LastUpgradeKey = null;
+                    node.LastUpgradeTime = DateTime.Now.Add(-GetUpgradeBackoff(node.UpgradeAttempts));
+                }
+
+                node.Update();
+            }
+
             if (model.Name.EqualIgnoreCase("ServiceController"))
             {
                 var appId = 0;

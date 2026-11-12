@@ -14,6 +14,7 @@ using Attachment = NewLife.Cube.Entity.Attachment;
 
 namespace Stardust.Web.Areas.Deployment.Controllers;
 
+/// <summary>部署版本。每个部署集下的构建产物版本</summary>
 [Menu(80, false)]
 [DeploymentArea]
 public class AppDeployVersionController : DeploymentEntityController<AppDeployVersion>
@@ -26,7 +27,7 @@ public class AppDeployVersionController : DeploymentEntityController<AppDeployVe
 
         AddFormFields.RemoveCreateField();
         AddFormFields.RemoveField("Hash");
-        ListFields.TraceUrl();
+        ListFields.LocalizedTraceUrl();
 
         LogOnChange = true;
 

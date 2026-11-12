@@ -39,6 +39,31 @@ struct NetTotals
     std::uint64_t Received = 0;
 };
 
+// TCP 连接状态计数，对应心跳中的 TcpConnections/TcpTimeWait/TcpCloseWait。
+struct TcpCounts
+{
+    std::uint64_t Established = 0;
+    std::uint64_t TimeWait = 0;
+    std::uint64_t CloseWait = 0;
+};
+
+// 磁盘 IO 采样，对应心跳中的 DiskIOPS 与 DiskActiveTime。
+// ActivePercent 为 0~100 的百分比，上报前由 Agent 换算成服务端使用的 0~1 比例。
+struct DiskIoSample
+{
+    std::uint64_t Iops = 0;
+    double ActivePercent = 0;
+};
+
+// ICMP 探测结果，对应心跳中的网络质量字段。
+struct ProbeResult
+{
+    bool Valid = false;
+    int Latency = 0;     // 平均延迟（毫秒）
+    double LossRate = 0; // 丢包率 0~1
+    double Score = 0;    // 综合评分 0~1
+};
+
 struct HardwareInfo
 {
     std::string UUID;
@@ -90,7 +115,24 @@ NetTotals NetTotalsSinceStart();
 std::uint64_t ProcessCount();
 std::vector<std::string> ProcessNames();
 std::uint64_t UptimeSeconds();
+// 系统负载。Linux/macOS 为 1 分钟平均负载，Windows 为处理器队列长度（与 .NET 客户端一致）。
 double LoadAverage();
+// 统计本机 TCP 连接状态分布；不支持统计的平台返回全 0。
+TcpCounts TcpStates();
+// 采集 CPU 温度（摄氏度）；无温度传感器时返回 0。
+double Temperature();
+// 采集电池电量百分比（0~100）；无电池或未知时返回 0。
+double BatteryPercent();
+// 采集无线信号强度（0~100）；有线或无无线网卡时返回 0。
+int WirelessSignal();
+// 采样磁盘 IO 速率；首次调用返回 0，之后按两次采样的间隔计算。
+DiskIoSample DiskIo();
+// 当前进程可打开文件句柄上限；平台无此概念时返回 0。
+std::uint64_t MaxOpenFiles();
+// 对目标主机做 ICMP 探测，用于评估网关/DNS/服务端网络质量。
+ProbeResult PingProbe(const std::string& host, int timeout_ms, int count);
+// 重启或关机本机。reboot=true 重启，false 关机；返回命令是否成功提交。
+bool PowerAction(bool reboot);
 
 HardwareInfo Hardware();
 SystemInfo System();

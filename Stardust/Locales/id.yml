@@ -75,7 +75,6 @@
 "Downloading {0}": "Mengunduh {0}"
 "Download: {0}": "Unduh: {0}"
 "Download [{0}]: {1} {2}": "Unduh [{0}]: {1} {2}"
-"Download failed, verification error: {0} (local) != {1} (remote)": "Unduh gagal, kesalahan verifikasi: {0} (lokal) != {1} (jarak jauh)"
 "Download completed; ready to overwrite: {0}": "Unduh selesai; siap menimpa: {0}"
 "Download file {0}, success: {1}": "Unduh file {0}, berhasil: {1}"
 "Download file {0}, source: {1}": "Unduh file {0}, sumber: {1}"
@@ -221,4 +220,4 @@
 "Succeeded": "Berhasil"
 "File [{0}] changed; stopping the application and starting it {1}ms later": "File [{0}] berubah; aplikasi dihentikan dan dimulai {1}ms kemudian"
 "Stardust distributed core": "Inti terdistribusi Stardust"
-"Stardust distributed service framework core library. Provides client SDKs for configuration center, registry, service discovery, distributed tracing, APM, and log center, supporting configuration pulling, service registration and discovery, call tracing, performance and log reporting.": "Pustaka inti kerangka layanan terdistribusi Stardust. Menyediakan SDK klien untuk pusat konfigurasi, registri, penemuan layanan, pelacakan terdistribusi, APM, dan pusat log, mendukung penarikan konfigurasi, pendaftaran dan penemuan layanan, pelacakan panggilan, serta pelaporan kinerja dan log."
+"Stardust distributed core client library. One-line integration for configuration delivery, service registration and discovery, distributed tracing, APM and log reporting.": "Pustaka klien inti terdistribusi Stardust. Integrasi satu baris untuk pengiriman konfigurasi, registrasi dan penemuan layanan, tracing, APM, dan pelaporan log."

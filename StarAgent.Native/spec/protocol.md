@@ -143,7 +143,8 @@ Authorization: Bearer <Token>
   "Token": "JWT",
   "Expire": 7200,
   "Time": 0,
-  "ServerTime": 1760000000000
+  "ServerTime": 1760000000000,
+  "DefaultLanguage": "可选，平台默认语言，如 zh-CN"
 }
 ```
 
@@ -153,6 +154,7 @@ Authorization: Bearer <Token>
 - 原生 Agent 必须持久化响应中的 `Code`/`Secret`；后续登录携带它们。
 - 服务端可能返回新的 `Code`/`Secret`（编码规则变化），收到后覆盖本地值。
 - `Expire` 单位为秒。
+- `DefaultLanguage` 为可选字段。有界面或日志本地化能力的客户端应保存该值并在下次启动时应用；值为 `auto` 时表示平台未配置默认语言，支持清除的客户端应恢复系统语言；无法识别的语言直接忽略，不阻断登录。
 - 登录失败返回 4xx/5xx；自动注册被禁止时不要反复重试，记录日志并退出或等待人工配置。
 
 ### 3.2 注销 `POST /node/logout?reason=...`
@@ -215,6 +217,7 @@ Authorization: Bearer <Token>
   "Period": 60,
   "Token": "可选，即将过期时下发新令牌",
   "NewServer": "可选，服务器迁移地址",
+  "DefaultLanguage": "可选，平台默认语言，在线调整语言时下发",
   "Commands": [
     {
       "Id": 123,
@@ -255,6 +258,44 @@ Authorization: Bearer <Token>
 ```
 
 首版原生 Agent **不执行自升级**：收到非空响应时记录日志并上报事件 `Upgrade`（内容为可用版本），由运维手动更新。服务端必须按 `ProductCode` 过滤，避免把 .NET 包发给原生 Agent。
+
+### 3.4.1 引导安装 `POST /node/bootstrap`
+
+原生 Agent 只做采集与指令响应；需要完整能力（自身升级、远程发布、插件、进程守护）时，由运维在节点上执行 `staragent bootstrap`，客户端登录后调用本接口取包并安装 .NET 版 StarAgent。
+
+- 响应为 `BootstrapModel` 或空（服务端未维护安装包时返回空）：
+
+```json
+{
+  "Version": "3.6.2026.0104",
+  "Server": "https://star.example.com:6600",
+  "Code": "节点编码",
+  "Runtime": {
+    "Version": "10.0.9",
+    "Kind": "runtime",
+    "FileName": "dotnet-runtime-10.0.9-linux-arm64.tar.gz",
+    "Source": "https://.../dotnet-runtime-10.0.9-linux-arm64.tar.gz?token=xxx",
+    "Size": 35600000,
+    "FileHash": "md5 或 sha512"
+  },
+  "Agent": {
+    "Version": "3.6.2026.0104",
+    "FileName": "staragent100.tar.gz",
+    "Source": "https://.../staragent100.tar.gz?token=xxx",
+    "Size": 12345678,
+    "FileHash": "md5"
+  }
+}
+```
+
+约定：
+
+- `Source` 由服务端补全为绝对地址，并附加短时下载令牌；客户端不得自行拼接路径。
+- `Runtime` 为空表示该平台无需安装运行时（例如使用自包含发布包），此时直接安装 `Agent`。
+- 安装需 `root`/管理员权限；Linux 安装到 `/opt/staragent` 与 `/usr/share/dotnet`，Windows 安装到 `C:\Program Files\StarAgent`。
+- 安装命令固定为 `dotnet StarAgent.dll -install -server <Server>`（.NET 版自己的服务安装，与原生 Agent 无关）；原生 Agent 不注册系统服务。
+- 安装成功后原生 Agent 记录并通过事件上报 `Bootstrap`（内容为已安装版本），由运维停用原生产物。
+
 
 ### 3.5 事件上报 `POST /node/postevents`
 
@@ -384,6 +425,7 @@ Authorization: Bearer <Token>
 | `node/synctime` | 全平台 | 可选参数为时间字符串；无参数时使用服务端时间 |
 | `node/setchannel` | 全平台 | 修改更新通道并持久化 |
 | `node/restart` | 全平台 | 延迟 1 秒后重启自身进程/服务 |
+| `node/bootstrap` | 全平台 | 引导安装 .NET 运行时与完整版 StarAgent；需配置 `Bootstrap=true`（默认关闭，否则回复 `取消`/“引导安装未启用”） |
 | `node/reboot` | 全平台 | 首版不实现，回复不支持 |
 | `deploy/*` | — | 首版不实现，回复不支持 |
 | `framework/install` | — | 首版不实现，回复不支持 |
@@ -421,7 +463,8 @@ Authorization: Bearer <Token>
 
 - `agent:go` / `agent:rust` / `agent:cpp`
 - `cap:exec`（是否支持命令执行）
-- `cap:upgrade=false`（首版固定 false）
+- `cap:bootstrap=true`（支持引导安装 .NET 版 StarAgent）
+- `cap:upgrade=false`（首版固定 false，不执行自升级）
 - `cap:deploy=false`
 - `os:linux` / `os:windows` / `os:macos` / `os:android` / `os:ios`
 
@@ -462,14 +505,18 @@ Authorization: Bearer <Token>
 
 ## 8. 平台服务形态
 
-| 平台 | 形态 | 说明 |
-|------|------|------|
-| Linux | systemd | `Restart=always`，`KillSignal=SIGTERM`，服务用户可配置 |
-| OpenWrt | procd | `/etc/init.d/staragent`，`start_service`/`stop_service` |
-| Windows | Windows Service | 服务名 `StarAgentNative`，支持 install/uninstall/start/stop |
-| macOS | launchd | `~/Library/LaunchAgents` 或 `/Library/LaunchDaemons` |
+原生 Agent 自身**不提供**系统服务安装能力，只提供 `run` / `once` / `version` 三个子命令，`run` 即前台常驻进程。进程守护、开机自启、日志重定向由部署侧负责：
+
+| 平台 | 形态 | 守护方式 |
+|------|------|----------|
+| Linux | 前台进程 | 部署脚本生成 systemd unit（`Restart=always`、`KillSignal=SIGTERM`），或容器 `restart: always` |
+| OpenWrt | 前台进程 | 部署脚本生成 `/etc/init.d/staragent` 的 procd 脚本（`procd_set_param respawn`） |
+| Windows | 前台进程 | 任务计划程序（`-RunLevel Highest`）或 nssm 之类包装器；原生 Agent 不注册为 Windows 服务 |
+| macOS | 前台进程 | launchd plist（`/Library/LaunchDaemons` 或 `~/Library/LaunchAgents`） |
 | Android | Foreground Service | 常驻通知；受电池优化/厂商策略影响，不保证 100% 在线 |
 | iOS | 宿主 App 内 SDK | 不常驻、不执行任意 Shell、不做进程守护 |
+
+> 需要完整能力（自身升级、远程发布、进程守护、插件等）时，应安装 .NET 版 StarAgent；原生 Agent 可通过 `bootstrap` 完成该安装（见 3.8）。
 
 ---
 

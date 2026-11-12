@@ -4,7 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>StarWeb</AssemblyName>
     <AssemblyTitle>Stardust management portal</AssemblyTitle>
-    <Description>Management portal for the Stardust distributed service platform. A visual management system built on NewLife.Cube, providing unified entry points for node management, application management, configuration center, registry, monitoring center, release center, call chain tracing, performance analysis, and log queries.</Description>
+    <Description>Management console of the Stardust distributed service platform, built on NewLife.Cube. Provides unified entry points for node management, application center, configuration center, registry, monitoring center, release center, gateway management, dashboards, data middleware and MCP.</Description>
     <Company>新生命开发团队</Company>
     <Copyright>©2002-2026 NewLife</Copyright>
     <VersionPrefix>3.7</VersionPrefix>
@@ -48,16 +48,17 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NewLife.Cube.Core" Version="6.15.2026.1018-beta1727" />
+    <PackageReference Include="NewLife.Cube.Core" Version="6.16.2026.1105-beta0802" />
     <PackageReference Include="NewLife.IP" Version="2.6.2026.1024" />
-    <PackageReference Include="NewLife.Redis" Version="7.0.2026.1024" />
-    <PackageReference Include="NewLife.Remoting.Extensions" Version="4.0.2026.1024" />
+    <PackageReference Include="NewLife.Redis" Version="7.0.2026.1026-beta0931" />
+    <PackageReference Include="NewLife.Remoting.Extensions" Version="4.0.2026.1109-beta0753" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Stardust.Data\Stardust.Data.csproj" />
     <ProjectReference Include="..\Stardust.Extensions\Stardust.Extensions.csproj" />
     <ProjectReference Include="..\Stardust\Stardust.csproj" />
+    <ProjectReference Include="..\Stardust.Mcp\Stardust.Mcp.csproj" />
   </ItemGroup>
 
   <ItemGroup>

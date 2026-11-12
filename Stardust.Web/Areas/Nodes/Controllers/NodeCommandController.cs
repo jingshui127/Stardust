@@ -8,6 +8,7 @@ using Stardust.Data.Nodes;
 
 namespace Stardust.Web.Areas.Nodes.Controllers;
 
+/// <summary>节点指令。下发到节点的命令记录</summary>
 [Menu(58, false)]
 [NodesArea]
 public class NodeCommandController : EntityController<NodeCommand>
@@ -24,7 +25,7 @@ public class NodeCommandController : EntityController<NodeCommand>
             var df = ListFields.GetField("Command") as ListField;
             df.Url = "/Nodes/NodeCommand?nodeId={NodeId}&command={Command}";
         }
-        ListFields.TraceUrl();
+        ListFields.LocalizedTraceUrl();
     }
 
     public override void OnActionExecuting(ActionExecutingContext filterContext)

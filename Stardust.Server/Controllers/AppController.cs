@@ -22,6 +22,17 @@ namespace Stardust.Server.Controllers;
 [Route("[controller]")]
 public class AppController(RegistryService registryService, ITokenService tokenService, DeployService deployService, AppSessionManager sessionManager, IServiceProvider serviceProvider, ITracer tracer, StarServerSetting setting) : BaseController(registryService, tokenService, serviceProvider)
 {
+    /// <summary>写日志。抑制短时间内的重复连接记录，避免客户端重连风暴冲垮历史表</summary>
+    /// <param name="action">动作名称</param>
+    /// <param name="success">是否成功</param>
+    /// <param name="message">消息内容</param>
+    public override void WriteLog(String action, Boolean success, String message)
+    {
+        if (!WebSocketHistoryFilter.TryAccept(Context?.ClientId, action, ref message)) return;
+
+        base.WriteLog(action, success, message);
+    }
+
     #region 登录注销
     [AllowAnonymous]
     [HttpPost(nameof(Login))]
@@ -240,7 +251,7 @@ public class AppController(RegistryService registryService, ITokenService tokenS
         var target = App.FindByName(code) ?? throw new ArgumentOutOfRangeException(nameof(model.Code), L.T("Invalid application."));
 
         var app = Context.Device as App;
-        if (app == null) throw new ApiException(ApiCode.Unauthorized, L.T("No permission to perform this operation."));
+        if (app == null) throw new ApiException(ApiCode.Unauthorized, L.T("The current connection has no valid application identity. Application commands require an application token."));
 
         // 安全V-2：未配置密钥的应用可被匿名冒用，禁止其向其它应用下发控制命令
         if (app.Secret.IsNullOrEmpty())
@@ -252,7 +263,7 @@ public class AppController(RegistryService registryService, ITokenService tokenS
                 throw new ApiException(ApiCode.Forbidden, L.T("[{0}] is not allowed to operate application [{1}].\nFor security, applications cannot send control commands to other applications by default.\nIn the registry, edit the controllable nodes of [{0}], add [{2}], or set it to * for all applications.", app, target, target.Name));
         }
         else if (!setting.AllowControlNodesWhenEmpty)
-            throw new ApiException(ApiCode.Unauthorized, L.T("No permission to perform this operation."));
+            throw new ApiException(ApiCode.Forbidden, L.T("[{0}] has no controllable nodes configured.\nFor security, applications cannot send control commands to other applications by default.\nIn the registry, edit the controllable nodes of [{0}], add [{1}], or set it to * for all applications. Internal environments may set AllowControlNodesWhenEmpty=true to allow apps without explicit nodes.", app, target.Name));
 
         return registryService.SendCommand(target, clientId, model, app + "");
     }
@@ -337,7 +348,7 @@ public class AppController(RegistryService registryService, ITokenService tokenS
             };
             consumes.Add(svc);
 
-            WriteLog("ResolveService", true, L.TLog("Consuming service [{0}] {1}", model.ServiceName, model.ToJson()));
+            WriteLog(HistoryAction.ResolveService, true, L.TLog("Consuming service [{0}] {1}", model.ServiceName, model.ToJson()));
         }
 
         // 节点信息

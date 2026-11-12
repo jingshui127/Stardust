@@ -9,6 +9,7 @@ using XCode.Membership;
 
 namespace Stardust.Web.Areas.Monitors.Controllers;
 
+/// <summary>采样数据。按采样率保留的链路明细</summary>
 [Menu(0, false)]
 [MonitorsArea]
 public class SampleDataController : WebReadOnlyEntityController<SampleData>
@@ -21,7 +22,7 @@ public class SampleDataController : WebReadOnlyEntityController<SampleData>
         {
             var df = ListFields.AddListField("AppName", "Name");
             df.Header = "应用";
-            df.DisplayName = "{AppName}";
+            df.Text = "{AppName}";
             df.Title = "应用监控图表";
             df.Url = "/Monitors/appDayStat?monitorId={AppId}";
         }
@@ -35,7 +36,7 @@ public class SampleDataController : WebReadOnlyEntityController<SampleData>
         {
             var df = ListFields.GetField("Name") as ListField;
             df.Header = "操作名";
-            df.DisplayName = "{Name}";
+            df.Text = "{Name}";
             df.Title = "{Tag}";
             df.Url = "/Monitors/traceDayStat?appId={AppId}&itemId={ItemId}";
         }

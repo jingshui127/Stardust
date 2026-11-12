@@ -8,6 +8,7 @@ using static Stardust.Data.Monitors.AppMinuteStat;
 
 namespace Stardust.Web.Areas.Monitors.Controllers;
 
+/// <summary>应用分钟统计。按分钟汇总的应用性能指标</summary>
 [Menu(0, false)]
 [MonitorsArea]
 public class AppMinuteStatController : WebReadOnlyEntityController<AppMinuteStat>
@@ -26,6 +27,8 @@ public class AppMinuteStatController : WebReadOnlyEntityController<AppMinuteStat
 
         var start = p["dtStart"].ToDateTime();
         var end = p["dtEnd"].ToDateTime();
+        // 监控视图按最近5分钟查询，其余列表页未选时间时默认只查当天
+        if (p["t"] != "dash") MonitorSearchHelper.ResolveDateRange(appId, -1, default, ref start, ref end);
 
         // 选了应用，没有选时间，按照统计日期升序
         if (appId >= 0 && start.Year < 2000 && p.Sort.IsNullOrEmpty())

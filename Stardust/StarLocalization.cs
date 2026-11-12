@@ -11,6 +11,9 @@ namespace Stardust;
 public static class StarLocalization
 {
     #region 属性
+    /// <summary>自动语言。平台未配置默认语言时下发，客户端清除本机保存的平台语言并恢复系统语言</summary>
+    public const String AutoLanguage = "auto";
+
     /// <summary>可用词表语言。英文是源文与兜底，不需要单独的 en 词表文件</summary>
     public static String[] SupportedCultures { get; } =
     [
@@ -21,6 +24,22 @@ public static class StarLocalization
     #endregion
 
     #region 方法
+    /// <summary>启动阶段按宿主语言初始化日志语言。应在读取任何配置之前调用</summary>
+    /// <remarks>
+    /// 配置文件是持久化产物，其注释只跟随 <see cref="Localization.LogCulture"/>、<see cref="Localization.Culture"/>
+    /// 与 <see cref="Localization.DefaultCulture"/>，不跟随 <see cref="CultureInfo.CurrentUICulture"/>。
+    /// 若不提前设置，首次写出的注释是英文源文，等宿主语言稍后生效时又被改写成本地语言，
+    /// 导致每次启动都把配置文件重写一遍。这里只设置日志语言（配置文件注释），界面语言仍保持自动识别，
+    /// 避免影响按请求切换语言。平台下发的默认语言到达后会接管日志语言。
+    /// </remarks>
+    public static void InitLogCulture()
+    {
+        // 已显式指定语言（含配置文件里的 Language/DefaultLanguage）时不再覆盖
+        if (Localization.LogCulture != null || Localization.Culture != null || Localization.DefaultCulture != null) return;
+
+        Localization.LogCulture = CultureInfo.CurrentUICulture;
+    }
+
     /// <summary>归一化语言名称。支持裸语言码、区域语言与带权重的请求头片段</summary>
     /// <param name="name">语言名称，如 zh-CN、zh-TW、de-AT、ja，或 en-US,en;q=0.9</param>
     /// <returns>受支持的语言名称；无法匹配时返回 null</returns>
@@ -70,6 +89,10 @@ public static class StarLocalization
     /// <summary>按语言名称固定进程界面与日志语言</summary>
     /// <param name="language">语言名称，为空时不改动</param>
     /// <returns>实际生效的语言名称；未设置或无法识别时返回 null</returns>
+    /// <remarks>
+    /// 同时写入 <see cref="Localization.Culture"/> 与 <see cref="Localization.LogCulture"/>，请求级语言识别因
+    /// <see cref="Localization.Culture"/> 非空而跳过。平台下发的默认语言由 <c>StarClient</c> 拦截，本地固定语言优先。
+    /// </remarks>
     public static String? UseLanguage(String? language)
     {
         var name = NormalizeCulture(language);
