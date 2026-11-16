@@ -1,5 +1,14 @@
 # 星尘（Stardust）版本历史
 
+## v3.10.2026.1116 (2026-11-16)
+
+### 修复：Windows 重启命令挂死系统（本地补丁，待推上游）
+- **`node/reboot` 命令重写**（MyStarClient.Reboot）：旧逻辑先发 `shutdown -r`（不带 `-t` 时默认 30 秒倒计时，关机计划随即挂起），5 秒后补发 `shutdown -r -f` 会报错 1190「已计划系统关机」被拒绝——`-f` 强制从未生效。挂住的应用（dotnet/node 子应用）把关机管线卡死，最终表现为事件 6008 意外关机，只能靠内核级重启（ntdll NtShutdownSystem）救场
+- 新逻辑单次调用 `shutdown -r -f -t {timeout|0}`：`/f` 强制关闭挂住的应用，但保留正常的服务停止与落盘管线
+- 另：Windows 服务模式启动握手竞态（NewLife.Agent waitHint=2000ms 冷启动被 SCM 杀进程）已提 issue [NewLifeX/NewLife.Agent#23](https://github.com/NewLifeX/NewLife.Agent/issues/23)；本机已部署计划任务 `StarAgentBootStart`（开机延迟 2 分钟循环重试启动服务）兜底
+
+---
+
 ## v3.10.2026.1112-beta (2026-11-12)
 
 ### 上游同步（合并 237 提交，10-28 至 11-11）

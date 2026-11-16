@@ -460,13 +460,14 @@ internal class MyStarClient(StarAgentSetting set) : StarClient(set)
 
             if (Runtime.Windows)
             {
+                // 单次强制重启：/f 强制关闭挂住的应用，但保留正常的服务停止与落盘管线。
+                // 旧逻辑先发不带 /f 的重启（默认30秒倒计时，关机计划随即挂起），5 秒后补发 -f
+                // 会报错 1190「已计划系统关机」被拒绝——/f 从未生效，挂住的进程把关机管线
+                // 卡死，最终只能靠内核级重启救场（表现为事件 6008 意外关机）
                 if (timeout > 0)
-                    "shutdown".ShellExecute($"-r -t {timeout}");
+                    "shutdown".ShellExecute($"-r -f -t {timeout}");
                 else
-                    "shutdown".ShellExecute($"-r");
-
-                Thread.Sleep(5000);
-                "shutdown".ShellExecute($"-r -f");
+                    "shutdown".ShellExecute("-r -f -t 0");
             }
             else if (Runtime.Linux)
             {
