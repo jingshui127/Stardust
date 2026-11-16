@@ -10,6 +10,7 @@ using NewLife.Serialization;
 using Stardust.Data.Deployment;
 using Stardust.Data.Nodes;
 using Stardust.Deployment;
+using Stardust.Managers;
 using Stardust.Models;
 using Stardust.Server;
 
@@ -126,6 +127,48 @@ public class DeployService(StarFactory starFactory, ITracer tracer)
 
         // 异常时由 catch 的 throw 向外传播，不会执行到此处；正常返回命令 Id（fire-and-forget 时 SendNodeCommandAsync 返回 null，则回退 0）
         return (Int32)(reply?.Id ?? 0);
+    }
+
+    /// <summary>切换部署集当前版本。规则在 <see cref="AppDeployVersion.UseAsCurrent"/>；自动发布与 MVC/API 的 UseVersion 相同，对启用节点并行下发 install。</summary>
+    /// <param name="publishEnabledNodes">为 false 时只改版本号，由调用方自己决定向哪些节点下发。</param>
+    public async Task<String> UseVersion(Int32 versionId, String ip, Boolean publishEnabledNodes = true)
+    {
+        var ver = AppDeployVersion.FindById(versionId) ?? throw new Exception(L.T("Version not found."));
+        var app = ver.UseAsCurrent();
+        if (publishEnabledNodes)
+        {
+            await PublishEnabledNodes(app, ip);
+            if (app.Enable && app.AutoPublish)
+                return "已切换版本，并按自动发布向启用节点下发安装";
+        }
+        return publishEnabledNodes
+            ? "已切换版本号，未开启自动发布，未下发节点"
+            : "已切换版本号，未下发节点";
+    }
+
+    /// <summary>自动发布。应用版本后向启用节点下发安装。</summary>
+    public async Task PublishEnabledNodes(AppDeploy app, String ip)
+    {
+        if (app == null) return;
+        if (!app.Enable || !app.AutoPublish) return;
+
+        using var span = tracer?.NewSpan("AutoPublish", app);
+        try
+        {
+            var ts = new List<Task>();
+            var appNodes = AppDeployNode.FindAllByAppId(app.Id);
+            foreach (var item in appNodes)
+            {
+                if (item.Enable) ts.Add(Control(app, item, "install", ip, item.Delay, 0));
+            }
+            span?.AppendTag(L.TLog("Controlling {0} node(s)", ts.Count));
+            await Task.WhenAll(ts);
+        }
+        catch (Exception ex)
+        {
+            span?.SetError(ex, null);
+            throw;
+        }
     }
 
     /// <summary>发布控制</summary>
@@ -423,4 +466,61 @@ public class DeployService(StarFactory starFactory, ITracer tracer)
 
         return true;
     }
+
+    #region 节点应用文件日志
+
+    /// <summary>列出部署节点配置目录下的日志文件</summary>
+    public Task<DeployLogListResult> ListLogFilesAsync(AppDeployNode deployNode, CancellationToken cancellationToken = default)
+        => InvokeDeployLogAsync<DeployLogListResult>(deployNode, "deploy/log/list", BuildLogListArg(deployNode), cancellationToken);
+
+    /// <summary>读取日志文件尾部</summary>
+    public Task<DeployLogTailResult> TailLogFileAsync(AppDeployNode deployNode, String file, Int64 offset = 0, Int32 maxBytes = 256 * 1024, CancellationToken cancellationToken = default)
+    {
+        var arg = BuildLogListArg(deployNode);
+        var tail = new DeployLogTailArg
+        {
+            LogDirectory = arg.LogDirectory,
+            WorkingDirectory = arg.WorkingDirectory,
+            File = file,
+            Offset = offset,
+            MaxBytes = maxBytes,
+        };
+        return InvokeDeployLogAsync<DeployLogTailResult>(deployNode, "deploy/log/tail", tail, cancellationToken);
+    }
+
+    static DeployLogListArg BuildLogListArg(AppDeployNode deployNode)
+    {
+        var logDir = deployNode.GetEffectiveLogDirectory();
+        if (logDir.IsNullOrEmpty()) throw new InvalidOperationException(L.T("Log directory is not configured for this deploy node. Set it on the deploy set or node."));
+
+        return new DeployLogListArg
+        {
+            LogDirectory = logDir,
+            WorkingDirectory = deployNode.GetEffectiveWorkingDirectory(),
+            Pattern = deployNode.GetEffectiveLogFilePattern(),
+        };
+    }
+
+    async Task<T> InvokeDeployLogAsync<T>(AppDeployNode deployNode, String command, Object arg, CancellationToken cancellationToken)
+    {
+        var node = deployNode.Node ?? throw new InvalidOperationException(L.T("Node not found."));
+        var json = arg.ToJson();
+
+        var reply = await starFactory.SendNodeCommandAsync(node.Code, command, json, 0, 60, 25, cancellationToken);
+        if (reply == null) throw new TimeoutException(L.T("Timed out waiting for the node to respond. Check that StarAgent is online and upgraded."));
+
+        if (reply.Status == CommandStatus.错误)
+        {
+            var err = reply.Data?.ToString();
+            throw new InvalidOperationException(err.IsNullOrEmpty() ? L.T("The node failed to read logs.") : err);
+        }
+
+        var data = reply.Data?.ToString();
+        if (data.IsNullOrEmpty()) throw new InvalidOperationException(L.T("Empty response from node."));
+
+        var rs = data.ToJsonEntity<T>();
+        return rs ?? throw new InvalidOperationException(L.T("Invalid response from node."));
+    }
+
+    #endregion
 }

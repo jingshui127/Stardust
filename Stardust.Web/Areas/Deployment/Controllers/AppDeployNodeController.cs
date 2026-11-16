@@ -22,6 +22,10 @@ public class AppDeployNodeController : DeploymentEntityController<AppDeployNode>
         AddFormFields.RemoveCreateField();
         ListFields.LocalizedTraceUrl();
 
+        // 应用程序版本由心跳自动回填（AppDeployNode.Fill(AppOnline)/Fill(AppInfo)），install 发布回填部署版本（Version），均不开放手工编辑
+        AddFormFields.RemoveField("AppVersion");
+        EditFormFields.RemoveField("AppVersion");
+
         LogOnChange = true;
 
         {
@@ -60,15 +64,27 @@ public class AppDeployNodeController : DeploymentEntityController<AppDeployNode>
             if (entity != null) return [entity];
         }
 
-        var appId = p["deployId"].ToInt(-1);
-        if (appId <= 0) appId = p["appId"].ToInt(-1);
+        var deployId = p["deployId"].ToInt(-1);
+        var appId = p["appId"].ToInt(-1);
         var nodeId = p["nodeId"].ToInt(-1);
         var enable = p["enable"]?.ToBoolean();
 
-        PageSetting.EnableAdd = appId > 0;
+        PageSetting.EnableAdd = deployId > 0 || appId > 0;
         PageSetting.EnableNavbar = false;
 
-        return AppDeployNode.Search(appId, nodeId, enable, p["Q"], p);
+        // 部署集优先：按部署集直接过滤其节点
+        if (deployId > 0) return AppDeployNode.Search(deployId, nodeId, enable, p["Q"], p);
+
+        // 按应用：先换取该应用全部部署集 Id，再按集合过滤；应用无部署集即无节点
+        if (appId > 0)
+        {
+            var setIds = AppDeploy.FindAllByAppId(appId).Select(e => e.Id).ToArray();
+            if (setIds.Length == 0) return [];
+
+            return AppDeployNode.Search(setIds, nodeId, enable, p["Q"], p);
+        }
+
+        return AppDeployNode.Search(-1, nodeId, enable, p["Q"], p);
     }
 
     protected override Boolean Valid(AppDeployNode entity, DataObjectMethodType type, Boolean post)
@@ -142,5 +158,42 @@ public class AppDeployNodeController : DeploymentEntityController<AppDeployNode>
         await Task.WhenAll(ts);
 
         return JsonRefresh($"批量执行[{act}]操作", 1);
+    }
+
+    /// <summary>列出节点上配置的日志文件</summary>
+    [EntityAuthorize(PermissionFlags.Detail)]
+    public async Task<ActionResult> LogFiles(Int32 id)
+    {
+        var dn = AppDeployNode.Find(AppDeployNode._.Id == id);
+        if (dn == null || dn.Node == null) return Json(500, $"[{id}]不存在");
+
+        try
+        {
+            var rs = await _deployService.ListLogFilesAsync(dn, HttpContext.RequestAborted);
+            return Json(0, null, rs);
+        }
+        catch (Exception ex)
+        {
+            return Json(500, ex.Message);
+        }
+    }
+
+    /// <summary>读取日志文件尾部</summary>
+    [EntityAuthorize(PermissionFlags.Detail)]
+    public async Task<ActionResult> LogTail(Int32 id, String file, Int64 offset = 0, Int32 maxBytes = 262144)
+    {
+        var dn = AppDeployNode.Find(AppDeployNode._.Id == id);
+        if (dn == null || dn.Node == null) return Json(500, $"[{id}]不存在");
+        if (file.IsNullOrEmpty()) return Json(500, "请指定日志文件名");
+
+        try
+        {
+            var rs = await _deployService.TailLogFileAsync(dn, file, offset, maxBytes, HttpContext.RequestAborted);
+            return Json(0, null, rs);
+        }
+        catch (Exception ex)
+        {
+            return Json(500, ex.Message);
+        }
     }
 }

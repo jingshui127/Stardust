@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.Serialization;
@@ -78,6 +78,14 @@ public partial class AppDeployNode
     [DataObjectField(false, false, true, 50)]
     [BindColumn("Version", "版本。当前使用的部署版本，开启MultiVersion时可能不同节点使用不同版本", "")]
     public String Version { get => _Version; set { if (OnPropertyChanging("Version", value)) { _Version = value; OnPropertyChanged("Version"); } } }
+
+    private String _AppVersion;
+    /// <summary>应用程序版本。该节点上应用在线实例上报的文件版本（应用入口程序集FileVersion），随心跳自动更新</summary>
+    [DisplayName("应用程序版本")]
+    [Description("应用程序版本。该节点上应用在线实例上报的文件版本（应用入口程序集FileVersion），随心跳自动更新")]
+    [DataObjectField(false, false, true, 50)]
+    [BindColumn("AppVersion", "应用程序版本。该节点上应用在线实例上报的文件版本（应用入口程序集FileVersion），随心跳自动更新", "")]
+    public String AppVersion { get => _AppVersion; set { if (OnPropertyChanging("AppVersion", value)) { _AppVersion = value; OnPropertyChanged("AppVersion"); } } }
 
     private Int32 _Port;
     /// <summary>应用端口。应用自身监听的端口，如果是dotnet应用会增加urls参数</summary>
@@ -176,6 +184,24 @@ public partial class AppDeployNode
     [DataObjectField(false, false, true, 200)]
     [BindColumn("HealthCheck", "健康检查。探针检测服务是否正常，http/tcp/udp地址，为空时使用应用集配置", "")]
     public String HealthCheck { get => _HealthCheck; set { if (OnPropertyChanging("HealthCheck", value)) { _HealthCheck = value; OnPropertyChanged("HealthCheck"); } } }
+
+    private String _LogDirectory;
+    /// <summary>日志目录。节点上应用日志目录；绝对路径或相对工作目录；为空时使用部署集配置</summary>
+    [Category("发布参数")]
+    [DisplayName("日志目录")]
+    [Description("日志目录。节点上应用日志目录；绝对路径或相对工作目录；为空时使用部署集配置")]
+    [DataObjectField(false, false, true, 500)]
+    [BindColumn("LogDirectory", "日志目录。节点上应用日志目录；绝对路径或相对工作目录；为空时使用部署集配置", "")]
+    public String LogDirectory { get => _LogDirectory; set { if (OnPropertyChanging("LogDirectory", value)) { _LogDirectory = value; OnPropertyChanged("LogDirectory"); } } }
+
+    private String _LogFilePattern;
+    /// <summary>日志文件匹配。为空时使用部署集配置，默认 *.log</summary>
+    [Category("发布参数")]
+    [DisplayName("日志文件匹配")]
+    [Description("日志文件匹配。为空时使用部署集配置，默认 *.log")]
+    [DataObjectField(false, false, true, 200)]
+    [BindColumn("LogFilePattern", "日志文件匹配。为空时使用部署集配置，默认 *.log", "*.log")]
+    public String LogFilePattern { get => _LogFilePattern; set { if (OnPropertyChanging("LogFilePattern", value)) { _LogFilePattern = value; OnPropertyChanged("LogFilePattern"); } } }
 
     private Int32 _ProcessId;
     /// <summary>进程</summary>
@@ -337,6 +363,7 @@ public partial class AppDeployNode
             "IP" => _IP,
             "Enable" => _Enable,
             "Version" => _Version,
+            "AppVersion" => _AppVersion,
             "Port" => _Port,
             "FileName" => _FileName,
             "Arguments" => _Arguments,
@@ -348,6 +375,8 @@ public partial class AppDeployNode
             "Mode" => _Mode,
             "Delay" => _Delay,
             "HealthCheck" => _HealthCheck,
+            "LogDirectory" => _LogDirectory,
+            "LogFilePattern" => _LogFilePattern,
             "ProcessId" => _ProcessId,
             "ProcessName" => _ProcessName,
             "ProcessUser" => _ProcessUser,
@@ -377,6 +406,7 @@ public partial class AppDeployNode
                 case "IP": _IP = Convert.ToString(value); break;
                 case "Enable": _Enable = value.ToBoolean(); break;
                 case "Version": _Version = Convert.ToString(value); break;
+                case "AppVersion": _AppVersion = Convert.ToString(value); break;
                 case "Port": _Port = value.ToInt(); break;
                 case "FileName": _FileName = Convert.ToString(value); break;
                 case "Arguments": _Arguments = Convert.ToString(value); break;
@@ -388,6 +418,8 @@ public partial class AppDeployNode
                 case "Mode": _Mode = (Stardust.Models.DeployMode)value.ToInt(); break;
                 case "Delay": _Delay = value.ToInt(); break;
                 case "HealthCheck": _HealthCheck = Convert.ToString(value); break;
+                case "LogDirectory": _LogDirectory = Convert.ToString(value); break;
+                case "LogFilePattern": _LogFilePattern = Convert.ToString(value); break;
                 case "ProcessId": _ProcessId = value.ToInt(); break;
                 case "ProcessName": _ProcessName = Convert.ToString(value); break;
                 case "ProcessUser": _ProcessUser = Convert.ToString(value); break;
@@ -473,6 +505,9 @@ public partial class AppDeployNode
         /// <summary>版本。当前使用的部署版本，开启MultiVersion时可能不同节点使用不同版本</summary>
         public static readonly Field Version = FindByName("Version");
 
+        /// <summary>应用程序版本。该节点上应用在线实例上报的文件版本（应用入口程序集FileVersion），随心跳自动更新</summary>
+        public static readonly Field AppVersion = FindByName("AppVersion");
+
         /// <summary>应用端口。应用自身监听的端口，如果是dotnet应用会增加urls参数</summary>
         public static readonly Field Port = FindByName("Port");
 
@@ -505,6 +540,12 @@ public partial class AppDeployNode
 
         /// <summary>健康检查。探针检测服务是否正常，http/tcp/udp地址，为空时使用应用集配置</summary>
         public static readonly Field HealthCheck = FindByName("HealthCheck");
+
+        /// <summary>日志目录。节点上应用日志目录；绝对路径或相对工作目录；为空时使用部署集配置</summary>
+        public static readonly Field LogDirectory = FindByName("LogDirectory");
+
+        /// <summary>日志文件匹配。为空时使用部署集配置，默认 *.log</summary>
+        public static readonly Field LogFilePattern = FindByName("LogFilePattern");
 
         /// <summary>进程</summary>
         public static readonly Field ProcessId = FindByName("ProcessId");
@@ -613,6 +654,12 @@ public partial class AppDeployNode
 
         /// <summary>健康检查。探针检测服务是否正常，http/tcp/udp地址，为空时使用应用集配置</summary>
         public const String HealthCheck = "HealthCheck";
+
+        /// <summary>日志目录。节点上应用日志目录；绝对路径或相对工作目录；为空时使用部署集配置</summary>
+        public const String LogDirectory = "LogDirectory";
+
+        /// <summary>日志文件匹配。为空时使用部署集配置，默认 *.log</summary>
+        public const String LogFilePattern = "LogFilePattern";
 
         /// <summary>进程</summary>
         public const String ProcessId = "ProcessId";

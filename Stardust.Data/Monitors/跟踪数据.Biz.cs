@@ -175,6 +175,57 @@ public partial class TraceData : Entity<TraceData>
 
         return FindAll(_.AppId == appId & _.StatMinute == statMinute);
     }
+
+    /// <summary>根据编号集合查找。按雪花Id解析分片日期后逐片查询，避免多值 Id In(...) 落到不存在的基础表</summary>
+    /// <param name="ids">编号集合</param>
+    /// <returns>实体列表</returns>
+    public static IList<TraceData> FindAllByIds(Int64[] ids)
+    {
+        var list = new List<TraceData>();
+        if (ids == null || ids.Length == 0) return list;
+
+        foreach (var group in ids.Distinct().GroupBy(GetShardDate))
+        {
+            using var split = Meta.CreateShard(group.Key);
+            foreach (var entity in FindAll(_.Id.In(group.ToArray()))) list.Add(entity);
+        }
+
+        return list;
+    }
+
+    /// <summary>按应用与时间窗查找跟踪数据。跨天时逐天复用单日查询，避免只查起始日分片而漏掉后续日期</summary>
+    /// <param name="appId">应用</param>
+    /// <param name="start">开始日期</param>
+    /// <param name="end">结束日期</param>
+    /// <param name="minError">最小错误数。0表示不限</param>
+    /// <returns>实体列表。不分页，调用方自行排序与截取</returns>
+    public static IList<TraceData> FindAllByAppIdAndTime(Int32 appId, DateTime start, DateTime end, Int32 minError)
+    {
+        var list = new List<TraceData>();
+        if (appId < 0) return list;
+
+        if (start.Year <= 1) start = DateTime.Today;
+        if (end.Year <= 1) end = DateTime.Today;
+        if (start > end) (start, end) = (end, start);
+
+        // 逐天查询，复用 Search 的单日分片路由（CreateShard(date)），跨天时不会漏掉后续分片
+        for (var date = start.Date; date <= end.Date; date = date.AddDays(1))
+        {
+            var items = Search(appId, -1, null, null, null, minError, false, date, date, null, null);
+            if (items.Count > 0) list.AddRange(items);
+        }
+
+        return list;
+    }
+
+    /// <summary>从雪花Id解析分片日期，解析失败时回退到今天</summary>
+    static DateTime GetShardDate(Int64 id)
+    {
+        if (id > 0 && Meta.Factory.Snow.TryParse(id, out var time, out var workerId, out var sequence) && time.Year > 1970)
+            return time.Date;
+
+        return DateTime.Today;
+    }
     #endregion
 
     #region 高级查询
@@ -325,7 +376,7 @@ public partial class TraceData : Entity<TraceData>
     /// <returns></returns>
     public static IList<TraceData> SearchGroupAppAndName(Int32 appId, DateTime start, DateTime end)
     {
-        var selects = _.Total.Sum() & _.Errors.Sum() & _.TotalCost.Sum() & _.MaxCost.Max() & _.MinCost.Min() & _.TotalValue.Sum() & _.AppId & _.Name & _.StatMinute;
+        var selects = _.Total.Sum() & _.Errors.Sum() & _.TotalCost.Sum() & _.MaxCost.Max() & _.MinCost.Min() & _.TotalValue.Sum() & _.AppId & _.Name & _.ItemId & _.StatMinute;
 
         var exp = new WhereExpression();
         exp &= _.AppId == appId;
@@ -333,7 +384,8 @@ public partial class TraceData : Entity<TraceData>
 
         using var split = Meta.CreateShard(start);
 
-        return FindAll(exp.GroupBy(_.AppId, _.Name, _.StatMinute), null, selects);
+        // 分组带上 ItemId，跟踪项未建立的行（ItemId=0）与正常行各自成组，供上层按 ItemId 守卫
+        return FindAll(exp.GroupBy(_.AppId, _.Name, _.ItemId, _.StatMinute), null, selects);
     }
 
     /// <summary>根据应用分组统计</summary>

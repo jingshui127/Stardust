@@ -47,7 +47,7 @@ StarAgent 是部署在每台应用服务器上的节点代理程序，以系统�
 - 心跳周期：60 秒，同时上报 CPU/内存/磁盘/网络等指标
 - 在线会话：通过 WebSocket 长连接保持，断线自动重连
 - 事件上报：心跳成功后取走 `Data/NodeEvents.csv` 台账分批上报，成功即删除；上报失败的事件写回台账，等下一次心跳重试
-- 时钟偏差：登录密钥用 `SaltPasswordProvider` 加时间盐，服务端按 `Setting.SaltTime`（默认 **600 秒**）判断盐值是否过期。客户端只用**一个时间源**——`GetNow()`（本机时间 + 服务端时间差），`Runtime.UtcNow` 与鉴权盐值都从它取值：`StarClient`/`AppClient` 在 `OnInit` 里把 `ServerTimeProvider` 装成进程全局时间提供者，因此业务代码直接用 `Runtime.UtcNow` 就能屏蔽本机时钟误差。时间差由登录响应与**每次心跳响应**的 `ServerTime` 刷新；进程内首次登录前，`ServerProbe` 请求一次匿名健康接口 `/api`，同时取回 `ServerTime` 与平台默认语言——**最多等 1 秒**，等待超时不取消请求，结果留给下一次登录复用。
+- 时钟偏差：登录密钥用 `SaltPasswordProvider` 加时间盐，服务端按 `Setting.SaltTime`（默认 **600 秒**）判断盐值是否过期。客户端只用**一个时间源**——`GetNow()`（本机时间 + 服务端时间差），`Runtime.UtcNow` 与鉴权盐值都从它取值：`StarClient`/`AppClient` 在 `OnInit` 里把 `ServerTimeProvider` 装成进程全局时间提供者，因此业务代码直接用 `Runtime.UtcNow` 就能屏蔽本机时钟误差。时间差由登录响应与**每次心跳响应**的 `ServerTime` 刷新；进程内首次登录前，`ServerProbe` 请求一次匿名健康接口 `/api`，取回 `ServerTime` 与平台默认语言（语言只用于登录前进程内，登录/心跳下发的语言才保存配置）——**最多等 1 秒**，等待超时不取消请求，结果留给下一次登录复用。
 - 系统时钟：**不自动修改**——改时钟是特权操作，容器内还会影响宿主机与同机所有服务。偏差超过 60 秒只上报一条限流告警（`ClockSkew`），提示运维修 NTP；确需校准时由运维下发 `node/synctime` 命令或配置同步周期，改钟成功后立即重算客户端时间差，避免旧偏差被叠加两次。
 - 定时任务跳变：`TimerX` 按单调嘀嗒计时，**相对周期定时器不受时间差影响**；按日历调度的逻辑（`TimerX.Now`、cron）会在首次对齐时一次性跳变，跳变幅度写入日志（`Server time offset applied`）。对齐时间差是**接入星尘的必选项**，默认就影响 `Runtime.UtcNow` 与定时调度器，客户端不提供开关；服务端的 `SyncTime` 只决定是否**修改系统时钟**。
 - 登录失败兜底：服务端错误信封附带 `serverTime`（NewLife.Remoting 4.x 起），客户端登录失败时先读出并校准时间差，重试即可用对齐时间重新签名；旧服务端不返回该字段时自然退化为探测 + 重试。
@@ -206,6 +206,7 @@ StarAgent 基于 NewLife.Agent 内置的 `AgentWebPanel` 框架，提供了轻�
 - **前端**：嵌入式 `index.html` SPA（单页应用）
 - **监听端口**：默认 5500（`staragent.config` 中 `LocalPort`，启动时覆盖 `agent.config` 的 `WebPort`）
 - **本地 UDP API**：同一端口承载本机 UDP RPC 与局域网广播搜索（`Api/Info`），固定使用 PascalCase 字段名（如 `LocalIP`、`FileVersion`），不受面板全局 camelCase 策略影响，供码神工具 ApiServer 搜索与本地命令行解析。每次 `Info` 探测都作为 `LocalProbe` 事件写入节点历史；无请求体的广播探测在事件备注与本地日志中记录来源地址
+- **本机 RPC 令牌**：`Info` 匿名只读（局域网发现与健康探测），`GetServices`/`StartService`/`StopService`/`RestartService`/`SetServer` 除了来源地址必须是本机，还必须携带 `local.token` 中的令牌，避免同机低权限进程借代理以 root/SYSTEM 身份启停受管服务。代理启动时生成随机令牌并写入自身目录（Linux `0600`、Windows 仅 SYSTEM/管理员/当前用户可读），同时尽力复制到系统共享位置（`/etc/staragent/local.token`、`%ProgramData%\StarAgent\local.token`）；调用方按“`STAR_LOCAL_TOKEN` 环境变量 → 代理同目录 → 共享位置”解析，读不到令牌即无法调用
 
 ### 6.2 面板功能
 

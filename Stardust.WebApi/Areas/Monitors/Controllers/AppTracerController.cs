@@ -143,6 +143,27 @@ public class AppTracerController : WebEntityController<AppTracer>
 
     protected override Boolean Valid(AppTracer entity, DataObjectMethodType type, Boolean post)
     {
+        if (!post)
+        {
+            // task-95 二期刀4：GET 查询后编辑表单回显掩码
+            if (type == DataObjectMethodType.Update && !entity.WebHook.IsNullOrEmpty()) entity.WebHook = MaskPlaceholder;
+
+            return base.Valid(entity, type, post);
+        }
+
+        // task-95 二期刀4：POST 保存前哨兵恢复原值——必须先于既有 Fix/Update 链，
+        // 否则掩码哨兵会随 entity.Update() 写库（F2 消解：前端行回填+PUT 恒带键）
+        var ent = entity as IEntity;
+        if (ent.Dirtys[nameof(AppTracer._.WebHook)] && entity.WebHook == MaskPlaceholder)
+        {
+            var old = AppTracer.FindByKey(entity.ID);
+            if (old != null)
+            {
+                entity.WebHook = old.WebHook;
+                ent.Dirtys[nameof(AppTracer._.WebHook)] = false;
+            }
+        }
+
         if (post)
         {
             // 更新时关联应用
@@ -258,4 +279,16 @@ public class AppTracerController : WebEntityController<AppTracer>
 
         return JsonRefresh("成功！");
     }
+
+    /// <summary>行级掩码规则（声明式，替代分散的 CropRow 与 Detail/Insert/Update/Delete override，语义逐键保真）：
+    /// 全视图（列表/详情/导出/写响应）WebHook 非空时掩码哨兵 "••••••"（非部分明文，回填提交由 Valid 守卫识别还原）。
+    /// 刀4 偏离一期「值级 null」惯例：F2 编辑回填（tracerPutBody 恒带 webHook）需要哨兵语义（null 回填→PUT 空→静默清库）。
+    /// 掩码只改写投影行，不触碰共享缓存中的原实体。</summary>
+    private static readonly Dictionary<String, Object> _masks = new(StringComparer.OrdinalIgnoreCase) { ["WebHook"] = MaskPlaceholder };
+
+    /// <summary>全视图统一掩码（原行为：五路出参全掩）。</summary>
+    protected override IDictionary<String, Object> GetRowMasks(ViewKinds view) => _masks;
+
+    /// <summary>WebHook 掩码哨兵（lead 刀6 同款定值；非部分明文，回填提交由 Valid 守卫识别还原）</summary>
+    private const String MaskPlaceholder = "••••••";
 }

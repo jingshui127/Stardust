@@ -189,6 +189,10 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         // 登录历史
         WriteHistory(context, HistoryAction.NodeAuthentication, true, L.TLog("[{0}/{1}] authenticated {2}", node.Name, node.Code, inf.ToJson(false, false, false)));
 
+        // 旧版客户端在网络未就绪时上报 @pid 形式的客户端标识，无法按主机归组，且进程重启就换一个
+        if (!context.ClientId.IsNullOrEmpty() && context.ClientId[0] == '@')
+            XTrace.WriteLine("Node [{0}] logged in with a host-less client id [{1}], which cannot be grouped by host; upgrade the agent to report a stable instance identity", node.Code, context.ClientId);
+
         // 检查节点上线恢复
         NodeOnlineService.CheckOnline(node);
 
@@ -260,22 +264,22 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         var level = 5;
         if (!uuid.IsNullOrEmpty() && uuid != node.Uuid)
         {
-            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Unique identifier mismatch (new != old): {0} != {1}", uuid, node.Uuid), ip);
+            node.WriteHistory(HistoryAction.IdentityMismatch, false, L.TLog("Unique identifier mismatch (new != old): {0} != {1}", uuid, node.Uuid), ip);
             level--;
         }
         if (!guid.IsNullOrEmpty() && guid != node.MachineGuid)
         {
-            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Machine identifier mismatch (new != old): {0} != {1}", guid, node.MachineGuid), ip);
+            node.WriteHistory(HistoryAction.IdentityMismatch, false, L.TLog("Machine identifier mismatch (new != old): {0} != {1}", guid, node.MachineGuid), ip);
             level--;
         }
         if (!serial.IsNullOrEmpty() && serial != node.SerialNumber)
         {
-            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Computer serial number mismatch (new != old): {0} != {1}", serial, node.SerialNumber), ip);
+            node.WriteHistory(HistoryAction.IdentityMismatch, false, L.TLog("Computer serial number mismatch (new != old): {0} != {1}", serial, node.SerialNumber), ip);
             level--;
         }
         if (!board.IsNullOrEmpty() && board != node.Board)
         {
-            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Motherboard mismatch (new != old): {0} != {1}", board, node.Board), ip);
+            node.WriteHistory(HistoryAction.IdentityMismatch, false, L.TLog("Motherboard mismatch (new != old): {0} != {1}", board, node.Board), ip);
             //flag = false;
         }
         //if (!diskid.IsNullOrEmpty() && diskid != node.DiskID)
@@ -285,14 +289,14 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         //}
         if (!node.ProductCode.IsNullOrEmpty() && !productCode.IsNullOrEmpty() && !node.ProductCode.EqualIgnoreCase(productCode))
         {
-            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Product code mismatch (new != old): {0} != {1}", productCode, node.ProductCode), ip);
+            node.WriteHistory(HistoryAction.IdentityMismatch, false, L.TLog("Product code mismatch (new != old): {0} != {1}", productCode, node.ProductCode), ip);
             //level--;
         }
 
         // 机器名
         if (di.MachineName != node.MachineName)
         {
-            node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Machine name mismatch (new != old): {0} != {1}", di.MachineName, node.MachineName), ip);
+            node.WriteHistory(HistoryAction.IdentityMismatch, false, L.TLog("Machine name mismatch (new != old): {0} != {1}", di.MachineName, node.MachineName), ip);
         }
 
         // 网卡地址
@@ -303,7 +307,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             // 任意匹配则通过
             if (!nodems.Any(e => dims.Contains(e)))
             {
-                node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("MAC address mismatch (new != old): {0} != {1}", di.Macs, node.MACs), ip);
+                node.WriteHistory(HistoryAction.IdentityMismatch, false, L.TLog("MAC address mismatch (new != old): {0} != {1}", di.Macs, node.MACs), ip);
                 level--;
             }
         }
@@ -316,7 +320,7 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
             // 任意匹配则通过
             if (!nodems.Any(e => dims.Contains(e)))
             {
-                node.WriteHistory(HistoryAction.LoginValidation, false, L.TLog("Disk serial number mismatch (new != old): {0} != {1}", diskid, node.DiskID), ip);
+                node.WriteHistory(HistoryAction.IdentityMismatch, false, L.TLog("Disk serial number mismatch (new != old): {0} != {1}", diskid, node.DiskID), ip);
                 level--;
             }
         }
@@ -709,6 +713,35 @@ public class NodeService : DefaultDeviceService<Node, NodeOnline>
         online.Token = context.Token;
 
         return online;
+    }
+
+    /// <summary>弱网重连宽限期（秒）。默认900秒。会话标识随进程重启或网络切换变化</summary>
+    public Int32 OnlineReuseSeconds { get; set; } = 900;
+
+    /// <summary>获取在线。会话标识未命中时，宽限期内沿用同一节点的上一条在线记录</summary>
+    /// <remarks>
+    /// 弱网节点或代理重启会带来新的会话标识。若每次重连都新建在线记录，在线时长与心跳计数会被切成多段，
+    /// 历史查询噪声大。宽限期内沿用同一记录，只刷新会话标识，登录时间由登录流程重设。
+    /// </remarks>
+    /// <param name="context">上下文</param>
+    /// <returns>在线对象，需要新建时返回空</returns>
+    public override IOnlineModel? GetOnline(DeviceContext context)
+    {
+        var online = base.GetOnline(context);
+        if (online != null) return online;
+
+        if (context.Device is not Node node || node.ID <= 0) return null;
+
+        var last = NodeOnline.FindAllByNodeId(node.ID).OrderByDescending(e => e.UpdateTime).FirstOrDefault();
+        if (last == null) return null;
+
+        // 超过宽限期视为真正离线，等超时清理后重新建记录
+        if ((DateTime.Now - last.UpdateTime).TotalSeconds > OnlineReuseSeconds) return null;
+
+        var sid = GetSessionId(context);
+        if (!sid.IsNullOrEmpty()) last.SessionID = sid;
+
+        return last;
     }
     #endregion
 

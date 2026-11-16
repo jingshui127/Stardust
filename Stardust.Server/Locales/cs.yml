@@ -142,7 +142,7 @@
 "Failed to dispatch the deploy command to node {0}: {1}": "Nepodařilo se odeslat příkaz nasazení na uzel {0}: {1}"
 "Application authentication": "Ověřování aplikace"
 "Node authentication": "Ověřování uzlu"
-"Timed out offline": "Odpojeno z důvodu vypršení časového limitu"
+"Offline timeout": "Odpojeno z důvodu vypršení časového limitu"
 "An application with an empty secret cannot log in. Set a Secret for this application in the registry or enable re-registration.": "Aplikace s prázdným tajným klíčem se nemůže přihlásit. Nastavte Secret pro tuto aplikaci v registru nebo povolte opětovnou registraci."
 "Secret validation failed.": "Ověření tajného klíče selhalo."
 "[{0}] re-registered in [{1}] mode; secret issued": "[{0}] znovu zaregistrováno v režimu [{1}]; tajný klíč vydán"
@@ -220,3 +220,16 @@
 "The application [{0}] carried by the token does not exist. Check that the application exists and is enabled in the registry.": "The application [{0}] carried by the token does not exist. Check that the application exists and is enabled in the registry."
 "The current connection has no valid application identity. Application commands require an application token.": "The current connection has no valid application identity. Application commands require an application token."
 "Default language. Pushed to clients on login and heartbeat, e.g. zh-Hans or en; empty uses the core configuration DefaultLanguage.": "Výchozí jazyk. Odesílá se klientům při přihlášení a srdečním tepu, např. zh-Hans nebo en; prázdná hodnota použije DefaultLanguage ze základní konfigurace."
+# 运行时消息补充词条
+"AI chat is disabled.": "Chat s AI je vypnutý"
+"The AI service is not configured. Set AIUrl and AIModels in the platform settings.": "Služba AI není nakonfigurována. Nastavte AIUrl a AIModels v nastavení platformy"
+"AI request contains no valid message.": "Požadavek AI neobsahuje žádnou platnou zprávu"
+"AI model [{0}] is not allowed.": "Model AI [{0}] není povolen"
+"AI upstream request failed: {0}": "Požadavek na službu AI selhal: {0}"
+"AI upstream returned an invalid response: {0}": "Služba AI vrátila neplatnou odpověď: {0}"
+
+# AI分类与默认分组
+"AI对话": "AI chat"
+"默认": "Výchozí"
+"Deleted {1:n0} AppCommand records before [{0}]": "Deleted {1:n0} AppCommand records before [{0}]"
+"Deleted {1:n0} NodeCommand records before [{0}]": "Deleted {1:n0} NodeCommand records before [{0}]"

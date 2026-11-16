@@ -236,6 +236,31 @@ public class StarServerSetting : Config<StarServerSetting>, ITokenSetting
     [Description("MCP action set. Comma-separated module names (node/app/config/deploy/gateway/monitor/system), * means all enabled")]
     public String McpActionSet { get; set; } = "*";
 
+    /// <summary>启用AI对话。开启后，已登录应用可调用 /v1/chat/completions 获取大模型回复，默认关闭</summary>
+    [Category("AI对话")]
+    [Description("Enable the AI chat endpoint. When enabled, signed-in applications may call /v1/chat/completions with their sign-in token as the api_key. Default false.")]
+    public Boolean EnableAI { get; set; }
+
+    /// <summary>AI对话地址。OpenAI兼容端点，可填基础地址、以/v1结尾的地址或完整的chat/completions地址，如 https://ai.newlifex.com</summary>
+    [Category("AI对话")]
+    [Description("AI chat endpoint. OpenAI-compatible base URL, a URL ending with /v1, or the full chat/completions URL, e.g. https://ai.newlifex.com")]
+    public String AIUrl { get; set; } = "";
+
+    /// <summary>AI访问密钥。作为Bearer令牌发给上游，星语网关使用 sk- 开头的密钥；留空表示上游不需要鉴权</summary>
+    [Category("AI对话")]
+    [Description("AI access key. Sent to the upstream as a Bearer token; StarChat gateway uses a sk- key. Empty means no authentication.")]
+    public String AIKey { get; set; } = "";
+
+    /// <summary>AI允许模型清单。逗号分隔，首个为默认模型；请求未指定模型时使用默认模型，指定时必须在清单内</summary>
+    [Category("AI对话")]
+    [Description("Allowed AI models, comma separated. The first entry is the default model used when the request omits one; any explicitly requested model must be in the list.")]
+    public String AIModels { get; set; } = "";
+
+    /// <summary>AI默认系统提示词。请求未带系统提示词时追加到平台上下文之后，用于约束下游应用共用的大模型行为</summary>
+    [Category("AI对话")]
+    [Description("Default AI system prompt appended to the platform context when the request carries no system message, to constrain the shared model behavior.")]
+    public String AISystemPrompt { get; set; } = "";
+
     /// <summary>敏感配置 key 关键词列表。配置项 key 名包含任一关键词（大小写不敏感）→ 视为敏感项，值一律返回 ***。逗号分隔。通用敏感配置，配置中心、MCP、审计等所有敏感值出口共用。</summary>
     [Description("Sensitive config key keywords. Comma-separated; a key containing any keyword (case-insensitive) is treated as sensitive and its value is masked as ***. Shared by all sensitive-value outputs, not specific to MCP.")]
     public String SensitiveKeywords { get; set; } = "db,database,redis,mysql,mssql,connectionstring,password,passwd,secret,token,apikey,access_key";

@@ -1,4 +1,3 @@
-using NewLife;
 using Stardust.Data.Configs;
 using Stardust.Data.Deployment;
 using Stardust.Mcp;
@@ -31,22 +30,10 @@ public class McpOperations : IMcpOperations
 
     public Task<Int32> PublishConfigAsync(Int32 configId) => _config.Publish(configId);
 
-    public async Task<String> UseVersionAsync(Int32 versionId, String ip)
-    {
-        var ver = AppDeployVersion.FindById(versionId) ?? throw new InvalidOperationException("Version does not exist.");
-        if (!ver.Enable || ver.Version.IsNullOrEmpty() || ver.Url.IsNullOrEmpty())
-            throw new InvalidOperationException("The version is disabled, or has no version number or package URL.");
-        var app = ver.Deploy ?? AppDeploy.FindById(ver.DeployId);
-        app.Version = ver.Version;
-        app.Update();
-        if (app.Enable && app.AutoPublish)
-        {
-            foreach (var node in AppDeployNode.FindAllByAppId(app.Id).Where(e => e.Enable))
-                await _deploy.Control(app, node, "install", ip, node.Delay, 0);
-            return "Version switched and installation dispatched to enabled nodes by auto publish.";
-        }
-        return "Version switched; auto publish is disabled, so no nodes were dispatched.";
-    }
+    public Task<ConfigRollbackResult> RollbackConfigAsync(Int32 historyId) => _config.Rollback(historyId);
+
+    public Task<String> UseVersionAsync(Int32 versionId, String ip, Boolean publishEnabledNodes = true)
+        => _deploy.UseVersion(versionId, ip, publishEnabledNodes);
 
     public async Task<Int32> ControlDeployAsync(Int32 deployId, Int32 deployNodeId, String action, String ip)
     {
@@ -71,5 +58,19 @@ public class McpOperations : IMcpOperations
     {
         var reply = await _star.SendAppCommandAsync(appName, clientId, command, args, 0, 3600, 5);
         return new { status = reply?.Status.ToString(), data = reply?.Data };
+    }
+
+    public async Task<Object> ReadDeployLogFilesAsync(Int32 deployNodeId)
+    {
+        var dn = AppDeployNode.FindById(deployNodeId) ?? throw new InvalidOperationException($"部署节点[{deployNodeId}]不存在");
+        var rs = await _deploy.ListLogFilesAsync(dn);
+        return new { files = rs.Files.Select(f => new { name = f.Name, size = f.Size, last_write_utc = f.LastWriteUtc }).ToArray() };
+    }
+
+    public async Task<Object> ReadDeployLogTailAsync(Int32 deployNodeId, String file, Int64 offset, Int32 maxBytes)
+    {
+        var dn = AppDeployNode.FindById(deployNodeId) ?? throw new InvalidOperationException($"部署节点[{deployNodeId}]不存在");
+        var rs = await _deploy.TailLogFileAsync(dn, file, offset, maxBytes);
+        return new { content = rs.Content, offset = rs.Offset, file_size = rs.FileSize, truncated = rs.Truncated };
     }
 }

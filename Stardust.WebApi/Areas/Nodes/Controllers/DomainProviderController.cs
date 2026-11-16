@@ -70,4 +70,12 @@ public class DomainProviderController : NodesEntityController<DomainProvider>
 
         return DomainProvider.Search(domain, enable, start, end, p["Q"], p);
     }
+
+    /// <summary>行级掩码规则（声明式，替代分散的 CropRow 与 Detail override，语义逐键保真）：
+    /// 列表行/详情行/导出 AppKey/AppSecret 值级置 null（键不删，task-94 一期 + 刀5）；
+    /// 写响应不掩码（原行为：无写路径 override）。掩码只改写投影行，不触碰共享缓存中的原实体。</summary>
+    private static readonly Dictionary<String, Object> _masks = new(StringComparer.OrdinalIgnoreCase) { ["AppKey"] = null, ["AppSecret"] = null };
+
+    /// <summary>列表/详情/导出统一掩码；写视图不掩码（原行为）。</summary>
+    protected override IDictionary<String, Object> GetRowMasks(ViewKinds view) => view is ViewKinds.List or ViewKinds.Detail ? _masks : null;
 }

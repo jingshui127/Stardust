@@ -142,7 +142,7 @@
 "Failed to dispatch the deploy command to node {0}: {1}": "Dağıtım komutu {0} düğümüne gönderilemedi: {1}"
 "Application authentication": "Uygulama kimlik doğrulaması"
 "Node authentication": "Düğüm kimlik doğrulaması"
-"Timed out offline": "Çevrimdışı olarak zaman aşımına uğradı"
+"Offline timeout": "Çevrimdışı olarak zaman aşımına uğradı"
 "An application with an empty secret cannot log in. Set a Secret for this application in the registry or enable re-registration.": "Gizli anahtarı boş olan bir uygulama oturum açamaz. Kayıt merkezinde bu uygulama için bir Secret ayarlayın veya yeniden kaydı etkinleştirin."
 "Secret validation failed.": "Gizli anahtar doğrulaması başarısız."
 "[{0}] re-registered in [{1}] mode; secret issued": "[{0}] [{1}] modunda yeniden kaydoldu; gizli anahtar verildi"
@@ -220,3 +220,16 @@
 "The application [{0}] carried by the token does not exist. Check that the application exists and is enabled in the registry.": "The application [{0}] carried by the token does not exist. Check that the application exists and is enabled in the registry."
 "The current connection has no valid application identity. Application commands require an application token.": "The current connection has no valid application identity. Application commands require an application token."
 "Default language. Pushed to clients on login and heartbeat, e.g. zh-Hans or en; empty uses the core configuration DefaultLanguage.": "Varsayılan dil. Oturum açma ve heartbeat sırasında istemcilere gönderilir, örn. zh-Hans veya en; boşsa çekirdek yapılandırmadaki DefaultLanguage kullanılır."
+# 运行时消息补充词条
+"AI chat is disabled.": "AI sohbeti devre dışı"
+"The AI service is not configured. Set AIUrl and AIModels in the platform settings.": "AI hizmeti yapılandırılmamış. Platform ayarlarında AIUrl ve AIModels değerlerini ayarlayın"
+"AI request contains no valid message.": "AI isteği geçerli bir mesaj içermiyor"
+"AI model [{0}] is not allowed.": "AI modeli [{0}] izin verilmiyor"
+"AI upstream request failed: {0}": "AI üst akış isteği başarısız oldu: {0}"
+"AI upstream returned an invalid response: {0}": "AI üst akışı geçersiz bir yanıt döndürdü: {0}"
+
+# AI分类与默认分组
+"AI对话": "AI sohbet"
+"默认": "Varsayılan"
+"Deleted {1:n0} AppCommand records before [{0}]": "Deleted {1:n0} AppCommand records before [{0}]"
+"Deleted {1:n0} NodeCommand records before [{0}]": "Deleted {1:n0} NodeCommand records before [{0}]"

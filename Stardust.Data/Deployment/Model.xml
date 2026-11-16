@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <EntityModel xmlns:xs="http://www.w3.org/2001/XMLSchema-instance" xs:schemaLocation="https://newlifex.com https://newlifex.com/Model202509.xsd" Document="https://newlifex.com/xcode/model" ModelVersion="2.0.2026.130" xmlns="https://newlifex.com/Model202509.xsd">
   <Option>
     <!--类名模板。其中{name}替换为Table.Name，如{name}Model/I{name}Dto等-->
@@ -77,6 +77,8 @@
         <Column Name="AutoStop" DataType="Boolean" Description="自动停止。随着宿主的退出，同时停止该应用进程" Category="发布参数" />
         <Column Name="ReloadOnChange" DataType="Boolean" Description="检测变动。当文件发生改变时，自动重启应用" Category="发布参数" />
         <Column Name="HealthCheck" DataType="String" Length="200" Description="健康检查。探针检测服务是否正常，http/tcp/udp地址，如http://localhost:6600/health" Category="发布参数" />
+        <Column Name="LogDirectory" DataType="String" Length="500" Description="日志目录。节点上应用日志目录；绝对路径或相对工作目录，为空时不可在控制台查看文件日志" Category="发布参数" />
+        <Column Name="LogFilePattern" DataType="String" Length="200" DefaultValue="*.log" Description="日志文件匹配。列目录与默认选中时使用，如 *.log 或 app-*.log" Category="发布参数" />
         <Column Name="CreateUserId" DataType="Int32" Description="创建者" Category="扩展" />
         <Column Name="CreateTime" DataType="DateTime" Description="创建时间" Category="扩展" />
         <Column Name="CreateIP" DataType="String" Description="创建地址" Category="扩展" />
@@ -99,6 +101,7 @@
         <Column Name="IP" DataType="String" Description="IP地址。节点所在内网IP地址" />
         <Column Name="Enable" DataType="Boolean" Description="启用" />
         <Column Name="Version" DataType="String" Description="版本。当前使用的部署版本，开启MultiVersion时可能不同节点使用不同版本" />
+        <Column Name="AppVersion" DataType="String" Description="应用程序版本。该节点上应用在线实例上报的文件版本（应用入口程序集FileVersion），随心跳自动更新" />
         <Column Name="Port" DataType="Int32" Description="应用端口。应用自身监听的端口，如果是dotnet应用会增加urls参数" />
         <Column Name="FileName" DataType="String" Description="文件。应用启动文件，可直接使用zip包，支持差异定制，为空时使用应用集配置" Category="发布参数" />
         <Column Name="Arguments" DataType="String" Length="500" Description="参数。启动应用的参数，为空时使用应用集配置" Category="发布参数" />
@@ -110,6 +113,8 @@
         <Column Name="Mode" DataType="Int32" Description="工作模式。Standard(10)/Shadow(11)/Hosted(12)/Task(13)。为空时使用应用集配置" Type="Stardust.Models.DeployMode" Category="发布参数" />
         <Column Name="Delay" DataType="Int32" Description="延迟。批量发布时，需要延迟执行的时间，用于滚动发布，单位秒" Category="发布参数" />
         <Column Name="HealthCheck" DataType="String" Length="200" Description="健康检查。探针检测服务是否正常，http/tcp/udp地址，为空时使用应用集配置" Category="发布参数" />
+        <Column Name="LogDirectory" DataType="String" Length="500" Description="日志目录。节点上应用日志目录；绝对路径或相对工作目录；为空时使用部署集配置" Category="发布参数" />
+        <Column Name="LogFilePattern" DataType="String" Length="200" DefaultValue="*.log" Description="日志文件匹配。为空时使用部署集配置，默认 *.log" Category="发布参数" />
         <Column Name="ProcessId" DataType="Int32" Description="进程" Category="状态" />
         <Column Name="ProcessName" DataType="String" Length="200" Description="进程名称" Category="状态" />
         <Column Name="ProcessUser" DataType="String" Description="进程用户。启动该进程的用户名" Category="状态" />

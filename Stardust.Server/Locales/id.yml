@@ -142,7 +142,7 @@
 "Failed to dispatch the deploy command to node {0}: {1}": "Gagal mengirim perintah deploy ke node {0}: {1}"
 "Application authentication": "Autentikasi aplikasi"
 "Node authentication": "Autentikasi node"
-"Timed out offline": "Offline karena habis waktu"
+"Offline timeout": "Offline karena habis waktu"
 "An application with an empty secret cannot log in. Set a Secret for this application in the registry or enable re-registration.": "Aplikasi dengan secret kosong tidak dapat login. Setel Secret untuk aplikasi ini di registri atau aktifkan pendaftaran ulang."
 "Secret validation failed.": "Validasi secret gagal."
 "[{0}] re-registered in [{1}] mode; secret issued": "[{0}] didaftarkan ulang dalam mode [{1}]; secret diterbitkan"
@@ -220,3 +220,16 @@
 "The application [{0}] carried by the token does not exist. Check that the application exists and is enabled in the registry.": "The application [{0}] carried by the token does not exist. Check that the application exists and is enabled in the registry."
 "The current connection has no valid application identity. Application commands require an application token.": "The current connection has no valid application identity. Application commands require an application token."
 "Default language. Pushed to clients on login and heartbeat, e.g. zh-Hans or en; empty uses the core configuration DefaultLanguage.": "Bahasa default. Dikirim ke klien saat login dan heartbeat, mis. zh-Hans atau en; kosong berarti menggunakan DefaultLanguage dari konfigurasi inti."
+# 运行时消息补充词条
+"AI chat is disabled.": "Obrolan AI dinonaktifkan"
+"The AI service is not configured. Set AIUrl and AIModels in the platform settings.": "Layanan AI belum dikonfigurasi. Atur AIUrl dan AIModels di pengaturan platform"
+"AI request contains no valid message.": "Permintaan AI tidak berisi pesan yang valid"
+"AI model [{0}] is not allowed.": "Model AI [{0}] tidak diizinkan"
+"AI upstream request failed: {0}": "Permintaan ke layanan AI gagal: {0}"
+"AI upstream returned an invalid response: {0}": "Layanan AI mengembalikan respons yang tidak valid: {0}"
+
+# AI分类与默认分组
+"AI对话": "Obrolan AI"
+"默认": "Bawaan"
+"Deleted {1:n0} AppCommand records before [{0}]": "Deleted {1:n0} AppCommand records before [{0}]"
+"Deleted {1:n0} NodeCommand records before [{0}]": "Deleted {1:n0} NodeCommand records before [{0}]"

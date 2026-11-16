@@ -66,6 +66,14 @@ public class AppPipelineController : DeploymentEntityController<AppPipeline>
             p);
     }
 
+    /// <summary>行级掩码规则（声明式，替代分散的 CropRow 与 Detail/Insert/Update/Delete override，语义逐键保真）：
+    /// 全视图（列表/详情/导出/写响应）Token/Secret 值级置 null（键不删，task-94 一期脱敏）；
+    /// 新提交值与旧存量值都不得回显。前端 webhook 复制走 CopyWebhook 专用端点（读原实体），不受出参掩码影响。</summary>
+    private static readonly Dictionary<String, Object> _masks = new(StringComparer.OrdinalIgnoreCase) { ["Token"] = null, ["Secret"] = null };
+
+    /// <summary>全视图统一掩码（原行为：五路出参全掩）。</summary>
+    protected override IDictionary<String, Object> GetRowMasks(ViewKinds view) => _masks;
+
     /// <summary>复制 webhook URL 到剪贴板</summary>
     /// <param name="id">流水线编号</param>
     /// <returns></returns>

@@ -124,6 +124,15 @@ public class AppDeployController : DeploymentEntityController<AppDeploy>
         return AppDeploy.Search(projectId, appId, category, enable, start, end, p["Q"], p);
     }
 
+    /// <summary>行级掩码规则（声明式，替代分散的 CropRow 与 Detail/Insert/Update/Delete override，语义逐键保真）：
+    /// 全视图（列表/详情/导出/写响应）RepoPassword/RepoUserName/DeployKey/UserName 值级置 null（键不删，task-94 一期脱敏）；
+    /// 新提交值与旧存量值都不得回显。Valid 守卫仍负责 "*****" 回显与恢复（POST 恢复原值防静默清库）；
+    /// 掩码只改写投影行，不触碰共享缓存中的原实体。</summary>
+    private static readonly Dictionary<String, Object> _masks = new(StringComparer.OrdinalIgnoreCase) { ["RepoPassword"] = null, ["RepoUserName"] = null, ["DeployKey"] = null, ["UserName"] = null };
+
+    /// <summary>全视图统一掩码（原行为：五路出参全掩）。</summary>
+    protected override IDictionary<String, Object> GetRowMasks(ViewKinds view) => _masks;
+
     protected override Boolean Valid(AppDeploy entity, DataObjectMethodType type, Boolean post)
     {
         if (!post)

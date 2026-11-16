@@ -66,6 +66,14 @@ public class NodeOnlineController : NodesEntityController<NodeOnline>
         return NodeOnline.Search(projectId, nodeId, provinceId, cityId, category, start, end, p["Q"], p);
     }
 
+    /// <summary>行级掩码规则（声明式，替代分散的 CropRow，语义逐键保真）：
+    /// 列表行/导出 Token 值级置 null（键不删，task-94 一期脱敏）；详情/写视图不掩码（原行为：无 override）。
+    /// 注：ListFields 已显式重建且不含 Token，此掩码为纵深防御（未来 allows 变更时兜底）。</summary>
+    private static readonly Dictionary<String, Object> _masks = new(StringComparer.OrdinalIgnoreCase) { ["Token"] = null };
+
+    /// <summary>仅列表/导出掩码（导出经掩码视图回退=List），详情/写视图不掩码（原行为）。</summary>
+    protected override IDictionary<String, Object> GetRowMasks(ViewKinds view) => view == ViewKinds.List ? _masks : null;
+
     public async Task<ActionResult> Trace(Int32 id)
     {
         var node = Node.FindByID(id);

@@ -35,7 +35,7 @@ StarServer（`Stardust.Server`）是星尘平台的服务端核心，提供所�
 │  MonitorService  AlarmService  AppOnlineService                  │
 │  DataRetentionService  DotNetSyncService                         │
 │  AgentDeployService  FileStorageService  RedisService            │
-│  MySqlService  UplinkService  ApolloService                      │
+│  MySqlService  UplinkService  ApolloService  AIService           │
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────┴──────────────────────────────────┐
@@ -66,6 +66,7 @@ StarServer（`Stardust.Server`）是星尘平台的服务端核心，提供所�
 | `OAuthController` | `/oauth` | OAuth 令牌服务 | PLT |
 | `AgentDeployController` | `/agentdeploy` | Agent 远程部署 | NODE |
 | `CubeController` | `/cube` | 魔方数据接口（附件等） | PUB |
+| `OpenAIController` | `/v1` | OpenAI 兼容对话（`chat/completions`，非流式与SSE流式） | SVR |
 | `ApiController` | `/api` | 系统信息/接口列表 | SVR |
 
 ### 3.2 核心服务
@@ -98,6 +99,7 @@ StarServer（`Stardust.Server`）是星尘平台的服务端核心，提供所�
 | `ShardTableService` | 分表服务 |
 | `UplinkService` | 上行链路服务 |
 | `ApolloService` | Apollo 配置集成 |
+| `AIService` | AI对话转发：OpenAI 兼容上游调用、模型白名单、错误收敛，支持非流式与 SSE 流式 |
 
 ---
 
@@ -108,7 +110,7 @@ StarServer（`Stardust.Server`）是星尘平台的服务端核心，提供所�
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | Port | 6600 | 服务端口 |
-| DefaultLanguage | — | 登录/心跳下发给客户端的默认语言，留空时沿用核心配置 DefaultLanguage |
+| DefaultLanguage | — | 登录/心跳/`/api` 下发的默认语言，留空时沿用核心配置 DefaultLanguage；客户端可用 `StarOptions.AcceptPlatformLanguage=false` 忽略，`/api` 语言只影响进程内 |
 | TokenSecret | — | JWT 令牌密钥 |
 | TokenExpire | 7200 | 令牌有效期（秒） |
 | SessionTimeout | 600 | 会话超时（秒） |
@@ -120,6 +122,11 @@ StarServer（`Stardust.Server`）是星尘平台的服务端核心，提供所�
 | MonitorSavePeriod | 300 | 监控落盘周期（秒） |
 | MonitorPatrolPeriod | 600 | 非热门应用巡检重算周期（秒） |
 | DataRetention | 3 | 数据保留天数 |
+| EnableAI | false | 启用 AI 对话接口，已登录应用可调用 `/v1/chat/completions` |
+| AIUrl | — | OpenAI 兼容上游地址，可填基础地址、`/v1` 地址或完整 chat/completions 地址 |
+| AIKey | — | 上游访问密钥，作为 Bearer 令牌发送；留空表示上游免鉴权 |
+| AIModels | — | 允许的模型清单，逗号分隔；首个为默认模型，请求未指定时使用；留空视为未配置 |
+| AISystemPrompt | — | 默认系统提示词，消息未带 system 时追加到平台上下文之后 |
 
 ---
 
@@ -147,5 +154,32 @@ StarServer（`Stardust.Server`）是星尘平台的服务端核心，提供所�
 请求: GET /config/getall?appId=xxx&token=xxx&version=N&scope=xxx
 响应: { version, scope, configs: {...}, nextVersion, updateTime }
 ```
+
+### 5.4 AI 对话协议
+
+对外遵循 OpenAI Chat Completions 协议，单端点 + `stream` 开关，已登录应用以登录令牌作为 `api_key`：
+
+```
+请求: POST /v1/chat/completions
+      Authorization: Bearer {appToken}
+      { model?, messages: [{ role, content }], temperature?, max_tokens?, stream? }
+响应: 200 application/json
+      { id, object: "chat.completion", created, model, choices: [{ index, message, finish_reason }], usage }
+错误: { error: { message, type, code } }，HTTP 状态码同步 400/401/403/429/500
+```
+
+流式对话（`stream: true`）：
+
+```
+请求: POST /v1/chat/completions  Authorization: Bearer {appToken}  { ..., "stream": true }
+响应: text/event-stream
+      data: { id, object: "chat.completion.chunk", created, model, choices: [{ index, delta: { role } }] }
+      data: { ..., choices: [{ index, delta: { content } }] }
+      data: { ..., choices: [{ index, delta: {}, finish_reason }] }
+      data: [DONE]
+错误: 未开始输出时回退 OpenAI 错误 JSON；已开始输出时写 data: { error }
+```
+
+> 上游地址与密钥由平台设置统一维护；转发前统一注入一条携带平台、应用与团队信息的 `system` 消息，详见 [AI-AI对话接口](AI-AI对话接口.md)。
 
 > 详见各子模块架构文档。

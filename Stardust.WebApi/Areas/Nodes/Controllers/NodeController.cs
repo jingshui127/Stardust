@@ -121,6 +121,21 @@ public class NodeController : NodesEntityController<Node>
         return Node.Search(projectId, provinceId, cityId, category, product, kind, version, runtime, framework, arch, enable, start, end, p["Q"], p);
     }
 
+    /// <summary>行级掩码规则（声明式，替代分散的 CropRow 与 Detail override，语义逐键保真）：
+    /// 列表行/导出 Secret/WebHook 值级置 null（task-94 一期 + 刀0/N1 增 WebHook）；
+    /// 详情行仅 WebHook 置 null——Secret 保守保留（节点详情/注册流程在用，一期裁定）；
+    /// 写响应不掩码（原行为）。掩码只改写投影行，不触碰共享缓存中的原实体。</summary>
+    private static readonly Dictionary<String, Object> _listMasks = new(StringComparer.OrdinalIgnoreCase) { ["Secret"] = null, ["WebHook"] = null };
+    private static readonly Dictionary<String, Object> _detailMasks = new(StringComparer.OrdinalIgnoreCase) { ["WebHook"] = null };
+
+    /// <summary>视图感知行级掩码规则，语义见 <see cref="WebEntityController{T}.GetRowMasks"/>。</summary>
+    protected override IDictionary<String, Object> GetRowMasks(ViewKinds view) => view switch
+    {
+        ViewKinds.List => _listMasks,
+        ViewKinds.Detail => _detailMasks,
+        _ => null,
+    };
+
     /// <summary>搜索</summary>
     /// <param name="category"></param>
     /// <param name="key"></param>

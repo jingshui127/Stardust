@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using NewLife;
 using NewLife.Log;
 using NewLife.Threading;
@@ -88,6 +88,9 @@ public class TraceStatService : ITraceStatService
 
     /// <summary>应用级统计时排除长连接埋点。默认true，避免连接时长污染应用平均耗时与最大耗时</summary>
     public Boolean ExcludeWebSocket { get; set; } = true;
+
+    /// <summary>应用级统计时排除阻塞类命令埋点。默认true，阻塞时长是队列等待而不是服务处理耗时</summary>
+    public Boolean ExcludeBlocking { get; set; } = true;
 
     /// <summary>热门应用有效窗口（秒）。查看页面后该窗口内保持流式实时统计</summary>
     private const Int32 HotWindow = 600;
@@ -272,8 +275,8 @@ public class TraceStatService : ITraceStatService
             if (!_queue.TryDequeue(out var td)) break;
             Interlocked.Decrement(ref _count);
 
-            // 过滤异常数据
-            if (td.AppId <= 0 || td.Name.IsNullOrEmpty()) continue;
+            // 过滤异常数据；跳过跟踪项未建立的行，不产 ItemId=0 统计（与分钟/小时/日批算守卫对称）
+            if (td.AppId <= 0 || td.ItemId == 0 || td.Name.IsNullOrEmpty()) continue;
 
             // 热门门控：仅热门应用（监控中心正在查看）保留小时/日统计的流式实时累加，
             // 非热门应用由巡检按 PatrolPeriod 兜底重算，显著降低统计写放大
@@ -687,6 +690,9 @@ public class TraceStatService : ITraceStatService
         // 聚合
         foreach (var item in list)
         {
+            // 跳过跟踪项未建立的行，不产 ItemId=0 统计（与小时/日守卫对称）
+            if (item.ItemId == 0) continue;
+
             var st = queue.GetOrAdd(item.StatMinute, appId, item.ItemId, out var key);
 
             st.Total = item.Total;
@@ -705,8 +711,9 @@ public class TraceStatService : ITraceStatService
         // 聚合应用分钟统计
         foreach (var item in list.GroupBy(e => e.AppId + "#" + e.StatMinute))
         {
-            // WebSocket 长连接的“耗时”是连接存活时长，计入应用平均值会掩盖真实接口耗时
-            var traces = ExcludeWebSocket ? item.Where(e => !TraceItem.IsWebSocket(e.Name)).ToList() : item.ToList();
+            // WebSocket 长连接与阻塞类命令的“耗时”都不是请求处理时长，计入应用平均值会掩盖真实接口耗时
+            var traces = item.Where(e => (!ExcludeWebSocket || !TraceItem.IsWebSocket(e.Name)) &&
+                                         (!ExcludeBlocking || !TraceItem.IsBlocking(e.Name))).ToList();
             if (traces.Count == 0) continue;
 
             var st = queue2.GetOrAdd(traces[0].StatMinute, traces[0].AppId, out var key);

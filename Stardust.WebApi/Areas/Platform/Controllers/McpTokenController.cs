@@ -52,6 +52,14 @@ public class McpTokenController : WebEntityController<McpToken>
         return McpToken.Search(token, enable, start, end, p["Q"], p);
     }
 
+    /// <summary>行级掩码规则（声明式，替代分散的 CropRow 与 Detail override，语义逐键保真）：
+    /// 列表行/详情行/导出 Token 值级置 null（键不删，task-94 一期脱敏）。
+    /// 写响应不掩码——create/reset 的一次性 Token 揭示 UX 依赖写响应回传明文（原行为）。</summary>
+    private static readonly Dictionary<String, Object> _masks = new(StringComparer.OrdinalIgnoreCase) { ["Token"] = null };
+
+    /// <summary>列表/详情/导出统一掩码；写视图不掩码（Token 揭示 UX，原行为）。</summary>
+    protected override IDictionary<String, Object> GetRowMasks(ViewKinds view) => view is ViewKinds.List or ViewKinds.Detail ? _masks : null;
+
     /// <summary>插入时自动生成Token字符串并同步资源授权</summary>
     protected override Int32 OnInsert(McpToken entity)
     {

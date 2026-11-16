@@ -1,6 +1,5 @@
 using System.Text.Json;
 using NewLife;
-using NewLife.Serialization;
 using Stardust.Data.Configs;
 
 namespace Stardust.Mcp.Tools.Config;
@@ -24,9 +23,16 @@ public class ConfigListTool : McpToolBase
     public override Task<Object> InvokeAsync(JsonElement args, McpContext ctx)
     {
         var app = McpGuard.App(ctx, GetInt32(args, "app_id"));
-        var cfg = AppConfig.FindAll(AppConfig._.AppId == app.Id & AppConfig._.ProjectId == ctx.ProjectId).FirstOrDefault();
-        if (cfg == null) return Task.FromResult<Object>(McpResult.Ok($"{app.Name} 还没有配置", new { records = Array.Empty<Object>() }));
-        var rows = ConfigData.FindAllByApp(cfg.Id).Select(e => new { e.Id, e.Key, e.Version, e.Enable, secret = McpGuard.Secret(e.Key) }).ToArray();
+        // 单应用定位用 FindByAppId。MVC/WebApi AppConfigController.Search 在 appId 上先 FindAllByAppId（没有则插入），再 AppConfig.Search；MCP 只读，不插入。
+        var cfg = AppConfig.FindByAppId(app.Id);
+        if (cfg == null)
+            return Task.FromResult<Object>(McpResult.Ok($"{app.Name} 还没有配置", new { records = Array.Empty<Object>() }));
+        // 定位后再核对项目。不符时不能把该配置的名称写进摘要。
+        if (cfg.ProjectId != ctx.ProjectId)
+            return Task.FromResult<Object>(McpResult.Ok("还没有配置", new { records = Array.Empty<Object>() }));
+        // 配置项与 Web/WebApi ConfigDataController.Search 相同：空键、空作用域、时间 MinValue、不按关键字。
+        var rows = ConfigData.Search(cfg.Id, "", "", DateTime.MinValue, DateTime.MinValue, null, null)
+            .Select(e => new { e.Id, e.Key, e.Version, e.Enable, secret = McpGuard.Secret(e.Key) }).ToArray();
         return Task.FromResult<Object>(McpResult.Ok($"{app.Name} 配置 {rows.Length} 项", new { config_id = cfg.Id, version = cfg.Version, records = rows }));
     }
 }
@@ -51,8 +57,9 @@ public class ConfigGetTool : McpToolBase
     public override Task<Object> InvokeAsync(JsonElement args, McpContext ctx)
     {
         var cfg = McpGuard.Config(ctx, GetInt32(args, "config_id"));
-        var key = GetString(args, "key");
-        var rows = ConfigData.FindAllByApp(cfg.Id).Where(e => key.IsNullOrEmpty() || e.Key.EqualIgnoreCase(key))
+        // 与 MVC/WebApi ConfigDataController.Search 一样走作用域为 string 的重载。null 会同时匹配 string 与 bool?。
+        var key = GetString(args, "key") ?? "";
+        var rows = ConfigData.Search(cfg.Id, key, "", DateTime.MinValue, DateTime.MinValue, null, null)
             .Select(e => new
             {
                 e.Key,
@@ -112,20 +119,22 @@ public class ConfigRollbackTool : McpToolBase
         required = new[] { "history_id" },
     });
 
-    public override Task<Object> InvokeAsync(JsonElement args, McpContext ctx)
+    public override async Task<Object> InvokeAsync(JsonElement args, McpContext ctx)
     {
-        var history = ConfigHistory.FindById(GetInt32(args, "history_id"));
-        if (history == null) throw new McpException(-32602, "配置历史不存在。");
-        var cfg = McpGuard.Config(ctx, history.ConfigId);
+        var historyId = GetInt32(args, "history_id");
+        if (historyId <= 0) throw new McpException(-32602, "无效参数：缺少 history_id。");
+        var history = ConfigHistory.FindById(historyId) ?? throw new McpException(-32602, "配置历史不存在。");
+        McpGuard.Config(ctx, history.ConfigId);
         if (!history.Action.EqualIgnoreCase("Publish")) throw new McpException(-32602, "只有发布历史可以回滚。");
-        var snap = history.Remark.ToJsonEntity<AppConfig>() ?? throw new McpException(-32602, "历史快照无法解析。");
-        var before = cfg.Version;
-        cfg.Version = snap.NextVersion > 0 ? snap.NextVersion : snap.Version;
-        cfg.NextVersion = snap.NextVersion;
-        cfg.Update();
-        ConfigHistory.Add(cfg.Id, "Rollback", true, cfg.ToJson());
-        var count = ConfigData.Publish(ConfigData.FindAllByApp(cfg.Id), cfg.Version);
-        return Task.FromResult<Object>(McpResult.Ok($"配置已从 v{before} 回滚到 v{cfg.Version}，重发布 {count} 项", new { before, version = cfg.Version, republished = count },
-            null, "此操作本身即回滚；如需再回滚到更早版本，调用 stardust_config_rollback 选择对应历史记录"));
+
+        // 复用宿主 ConfigService.Rollback（含版本恢复、Rollback 历史与 config/publish 通知），MCP 不直接操作实体
+        var ops = ctx.Services.GetService(typeof(IMcpOperations)) as IMcpOperations
+            ?? throw new McpException(-32000, "宿主未注册 MCP 写操作适配器。");
+        var rs = await ops.RollbackConfigAsync(history.Id);
+        var summary = $"配置已从 v{rs.Before} 回滚到 v{rs.Version}，重发布 {rs.Republished} 项，通知 {rs.Notified} 个应用";
+        if (!rs.NotifyError.IsNullOrEmpty()) summary += $"；通知失败：{rs.NotifyError}";
+        return McpResult.Ok(summary,
+            new { before = rs.Before, version = rs.Version, republished = rs.Republished, notified = rs.Notified, notify_error = rs.NotifyError },
+            null, "此操作本身即回滚；如需再回滚到更早版本，调用 stardust_config_rollback 选择对应历史记录");
     }
 }
