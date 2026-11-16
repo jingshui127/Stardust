@@ -7,6 +7,18 @@
 - 新逻辑单次调用 `shutdown -r -f -t {timeout|0}`：`/f` 强制关闭挂住的应用，但保留正常的服务停止与落盘管线
 - 另：Windows 服务模式启动握手竞态（NewLife.Agent waitHint=2000ms 冷启动被 SCM 杀进程）已提 issue [NewLifeX/NewLife.Agent#23](https://github.com/NewLifeX/NewLife.Agent/issues/23)；本机已部署计划任务 `StarAgentBootStart`（开机延迟 2 分钟循环重试启动服务）兜底
 
+### 上游同步（合并 66 提交，11-12 至 11-15）
+- **安全加固**：列表与详情响应不再回显密钥/证书密码、配置预览链接不再带密钥、审计历史脱敏与动作名规范化、SQL 调试面板默认关闭仅开发环境开启
+- **本机 RPC 认证**：增加共享令牌认证（FIX-17）、显式指定本机令牌时不再落盘随机值、弱网重连沿用同一节点在线记录（IMP-7）、客户端标识缺少主机段时用机器名补足（FIX-6）
+- **语言体系重构（破坏性）**：移除 `StarSetting.Language`，统一 StarOptions 启动选项；客户端按本地语言优先级处理平台下发语言，StarAgent 只由节点客户端应用平台语言
+- **AI 对话**：改为 OpenAI 兼容接口，参数精简并注入平台上下文
+- **WebApi/MCP**：Vue 控制台构建产物嵌入 StarWebApi；MCP 查询/配置回滚/节点日志/发版复用 MVC 与 API 宿主实现；阻塞类命令埋点独立归类并排除出应用耗时
+- **Web.Vue**：登录页按 Cube 登录注册能力换皮、流水线看板与手动触发、部署节点文件日志抽屉、应用日志日期范围与关键字过滤
+- **修复**：事件日志写失败不再打垮 Kestrel 心跳、Windows 部署调用只在 Windows 编译进程序、节点命令与测试连接改请求体下发、启用端点路由避免 /api 落到前端回退、网关路由域名按段匹配、启动时回修部署集节点计数偏差、命令保留期清理与应用性能采样
+- **测试**：WebApi 集成测试大量补全（反射脱敏迁移 HTTP 集成式、Areas 控制器冒烟、行级掩码序列化回归等）
+- **依赖升级**：NewLife.Core 12.0.2026.1115-beta0324、NewLife.Remoting/Extensions 4.0.2026.1115-beta0408、NewLife.XCode 12.3.2026.1115-beta0353
+- **本地保留验证**：重启补丁（`shutdown -r -f -t`）、机器指纹可信门（`Node.FindByFingerprint` + `IsTrustedClient`）、品牌化与 Costura/FodyWeavers（DisableCleanup=true）全部完好；产物核对 NewLife.Core 新基线 net8/net10=1774080（1115-beta0324），net461 单文件 4.7MB、0 dll
+
 ---
 
 ## v3.10.2026.1112-beta (2026-11-12)
