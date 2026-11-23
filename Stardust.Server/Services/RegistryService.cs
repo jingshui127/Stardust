@@ -17,7 +17,13 @@ using Service = Stardust.Data.Service;
 namespace Stardust.Server.Services;
 
 /// <summary>注册服务。处理应用注册、登录认证、服务注册与发现的核心服务</summary>
-public class RegistryService : DefaultDeviceService<Node, NodeOnline>
+/// <remarks>
+/// 泛型 Device 必须为 App（而非 Node）。基类静态构造用 typeof(TDevice) 反射取 Uuid 属性并
+/// 在 ValidateIdentity/BindIdentity 中作 GetValue/SetValue；若此处用 Node，而 AppController
+/// 把 context.Device 设为 App，PropertyInfo(声明于 Node) 作用在 App 实例上会抛
+/// TargetException，导致 App 登录 500。
+/// </remarks>
+public class RegistryService : DefaultDeviceService<App, AppOnline>
 {
     private readonly AppOnlineService _appOnline;
     private readonly IPasswordProvider _passwordProvider;
