@@ -1,5 +1,24 @@
 # 星尘（Stardust）版本历史
 
+## v3.10.2026.1123 (2026-11-23)
+
+### 上游同步（合并 34 提交，11-17 至 11-19）
+- **应用类型体系**：新增 `AppKinds` 应用类型枚举与相关模型，StarServer/StarWeb 管理端按应用类型分类展示
+- **集群配置同步**：StarServer/StarWeb 共用数据库时通过 `ConfigSyncManager`（NewLife.XCode）按 `{AppId}-{Scope}` 下发 Core/Sys/XCode/StarSetting 配置；60 秒轮询 + 事件总线，StarWeb 配置页双写
+  - ⚠️ 依赖 NewLife.XCode 源码新增的 `ConfigSyncManager`/`ConfigSyncEvent`/`ConfigSyncOptions`，NuGet 包尚未发布含该类型版本；本地联调需 `-p:UseLocalNewLifeSource=true`（见 Stardust.Data.csproj 注释）
+- **WebVue 面板族**：追踪面板、告警面板、网关面板、部署数据（useDeployData 大改 1187 行）、配置中心等大量前端更新
+- **目标框架**：新增 net11.0 目标；StarServer/StarWeb 由 net8.0 改为 **net10.0**（产出 Bin\Server、Bin\Web 顶层，AppendTargetFrameworkToOutputPath=false）
+- **其他**：升级 CI Actions、安装版本回填 API 测试补全、Stardust.Web/WebApi Startup 接线调整
+- **依赖升级**：NewLife.Core 12.0.2026.1115-beta2355、NewLife.Agent 10.18.2026.1116-beta0311（含 waitHint 竞态修复，见下）
+- **本地保留验证**：品牌化（科控物联/©2002-2026 TC/favicon.ico）、Costura/Fody（DisableCleanup=true）、机器指纹门（`Node.FindByFingerprint` + `IsTrustedClient`）全部完好
+
+### 修复：Windows 服务启动握手竞态（升级 NewLife.Agent 至含官方修复版本）
+- 升级 NewLife.Agent `10.18.2026.1107-beta1336` → `10.18.2026.1116-beta0311`（含官方 `7a9ceb86d` 修复：`StartWaitHint=30s` + `GetKeepAlivePeriod` 周期续报 + 状态上报加锁 + Interrogate 回带等待提示，Closes #23）
+- 解决 SCM 固定 `WAIT_HINT=2000ms` 下冷启动 >2s 被强杀（事件 7009/7000）、失败恢复链中断服务永久 Stopped 的隐患
+- 生产 E:\StarAgent 已部署并验证：服务稳定 RUNNING，FUXA(1881)/StarServer(6600)/StarWeb(6680) 全部拉起
+
+---
+
 ## v3.10.2026.1116 (2026-11-16)
 
 ### 修复：Windows 重启命令挂死系统（本地补丁，待推上游）
