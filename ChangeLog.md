@@ -17,6 +17,22 @@
 - 解决 SCM 固定 `WAIT_HINT=2000ms` 下冷启动 >2s 被强杀（事件 7009/7000）、失败恢复链中断服务永久 Stopped 的隐患
 - 生产 E:\StarAgent 已部署并验证：服务稳定 RUNNING，FUXA(1881)/StarServer(6600)/StarWeb(6680) 全部拉起
 
+### 依赖升级：全部 NewLife 库升级至 NuGet 最新版（11-21 ~ 11-22 发布）
+- NewLife.Core `12.0.2026.1115-beta2355` → **`12.0.2026.1121-beta0924`**（11-22 的 XCode 包依赖下限要求）
+- NewLife.Remoting / Remoting.Extensions `4.0.2026.1115-beta0408` → **`4.0.2026.1122-beta1417`**
+- NewLife.XCode `12.3.2026.1115-beta0353` → **`12.3.2026.1122-beta1034`**
+- NewLife.Redis `7.0.2026.1026-beta0931` → **`7.0.2026.1122-beta1520`**
+- NewLife.Cube / Cube.Core / Cube.Swagger `6.16.2026.1105-beta0802` → **`6.16.2026.1122-beta1026`**
+- NewLife.IP 维持 `2.6.2026.1024`（最新版无更新）
+
+### 适配：XCode 配置同步 API 变化（集群配置同步编译修复）
+- 上游 34 提交新增的集群配置同步代码引用了 `ConfigSyncOptions`，该类型从未进入 NewLife.XCode 任何已发布 NuGet 包——XCode 最终发布的 API 是 `ConfigSyncManager(string appId)` 构造函数 + `Add<T>(scope, skip)` / `AddCommon(skip)`，与 Stardust 源码假设的 `ConfigSyncOptions` 配置对象不一致（上游作者 34 提交时用的是本地 XCode 源码联调版本）
+- 本地适配：`Stardust.Server/Services/ConfigSync/StardustConfigSyncExtensions.cs` 新增 Stardust 侧 `ConfigSyncOptions` 收集器（`AppId` + `AddCommon()`/`Add<T>()` 延迟回放），`AddConfigSync` 改为 `new ConfigSyncManager(options.AppId)` 后回放收集的配置作用域，语义与上游一致
+- 适配后 StarServer 0 错误，`ConfigSyncManager`/`ConfigSyncEvent` 正常解析
+- **XCode 破坏性变更**：`XCode.Membership.IUser` 的 `ID` 属性改名为 `Id`（上游命名规范统一），修正 4 处引用——`Stardust.Web/Controllers/TraceController.cs`、`Stardust.Web/Controllers/DashboardController.cs`、`Stardust.Web/Views/Shared/_Layout_Dashboard.cshtml`、`Stardust.WebApi/Controllers/TraceController.cs`
+- **构建验证**：StarServer / StarWeb / StarWebApi（均 net10.0）与 StarAgent（net8.0 生产目标）全部 0 错误；产物核对 NewLife.Core 1743KB(11-21)、XCode 3474KB(11-22)、Cube 13594KB(11-22)、Redis 591KB(11-22)、Remoting 662KB(11-22)、Agent 1062KB(11-16)
+- **本地保留验证**：品牌化（科控物联/©2002-2026 TC/favicon.ico）、Costura/Fody（DisableCleanup=true）、机器指纹门（`Node.FindByFingerprint` + `IsTrustedClient`）全部完好
+
 ---
 
 ## v3.10.2026.1116 (2026-11-16)
